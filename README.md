@@ -51,4 +51,35 @@ This is a fast first filter, not a replacement for talking to real customers.
 
 ## Data and licenses
 
-<!-- TODO: datasets used, their licenses, and how to download them (raw data is not committed to this repo) -->
+Four public survey datasets from Hugging Face. **Raw data is not committed to this repo**: it is
+downloaded on demand into `data/raw/`, which is git-ignored. Each repo is pinned to a revision, so
+every run reproduces the same files. Sizes use decimal units (1 MB = 1,000,000 B), like the Hugging
+Face UI, and cover the repo files only (not the `.cache/huggingface/` metadata the downloader writes).
+
+| Dataset | Link | License | Revision | Size |
+| --- | --- | --- | --- | --- |
+| Twin-2K-500 | [LLM-Digital-Twin/Twin-2K-500](https://huggingface.co/datasets/LLM-Digital-Twin/Twin-2K-500) | CC BY 4.0 | `f883165a30` | 732.6 MB (183 files) |
+| Twin-2K-500-Mega-Study | [LLM-Digital-Twin/Twin-2K-500-Mega-Study](https://huggingface.co/datasets/LLM-Digital-Twin/Twin-2K-500-Mega-Study) | Apache 2.0 | `0401b715a3` | 287.3 MB (71 files) |
+| SubPOP (gated) | [jjssuh/subpop](https://huggingface.co/datasets/jjssuh/subpop) | CC BY-NC-SA 4.0 (non-commercial) | `886d78a5cb` | 34.6 MB (4 files) |
+| GlobalOpinionQA | [Anthropic/llm_global_opinions](https://huggingface.co/datasets/Anthropic/llm_global_opinions) | CC BY-NC-SA 4.0 (non-commercial) | `cb28804887` | 4.7 MB (3 files) |
+
+Revisions are shortened here; the full commit SHAs are pinned in `scripts/download_data.py`.
+Three of the four datasets are non-commercial or share-alike licensed, so check the terms before
+using them in a commercial setting.
+
+### Download everything
+
+```bash
+pip install huggingface_hub
+python scripts/download_data.py
+```
+
+Options:
+
+- `DATA_DIR=/path/to/data python scripts/download_data.py` — download somewhere else
+  (default: `data/raw/` in the repo).
+- `python scripts/download_data.py Twin-2K-500 GlobalOpinionQA` — download only some datasets.
+
+SubPOP is gated (manual approval by the dataset owner). Request access on its dataset page, then
+pass your token as `HF_TOKEN` to download it. Without `HF_TOKEN` the script skips SubPOP with a
+message and downloads the other three (~1.02 GB).
