@@ -37,6 +37,7 @@ Every estimate comes with an uncertainty range.
 
 ## Resources used to train the model
 [Resource 1](https://finrafoundation.org/nfcs-data-and-downloads)
+
 [Resource 2](https://www.researchgate.net/publication/414364301_Capturing_Immediate_Reactions_to_Societal_Events_An_Event-Triggered_Survey_Approach)
 
 
