@@ -84,7 +84,7 @@ Face UI, and cover the repo files only (not the `.cache/huggingface/` metadata t
 | GSS 1972-2024 cumulative (Stata) | [gss.norc.org](https://gss.norc.org/us/en/gss/get-the-data/stata.html) | [NORC terms and conditions](https://gss.norc.org/us/en/gss/terms-and-conditions.html) (cite, responsible use, data "as is") | Release 3a (July 2026) | 50.9 MB (2 files: `GSS_stata.zip` + 2024 codebook PDF) |
 | ANES (manual download) | [electionstudies.org](https://electionstudies.org/data-center/) | ANES conditions of use (account required; research/statistical use only, no redistribution) | 2024 Time Series 2026-05-19, 2024 Pilot 2024-03-19 | 10.0 MB (2 zip files) |
 
-Revisions are shortened here; the full commit SHAs are pinned in `scripts/download_data.py`.
+Revisions are shortened here; the full commit SHAs are pinned in `scripts/DownloadData.py`.
 SubPOP and GlobalOpinionQA are licensed CC BY-NC-SA 4.0 (non-commercial, share-alike). ANES may be
 used for research and statistical purposes only and may not be redistributed. The GSS requires the
 citation below. Check these terms before using the data in a commercial setting.
@@ -116,14 +116,14 @@ version. www.electionstudies.org
 
 ```bash
 pip install huggingface_hub
-python scripts/download_data.py
+python scripts/DownloadData.py
 ```
 
 Options:
 
-- `DATA_DIR=/path/to/data python scripts/download_data.py` — download somewhere else
+- `DATA_DIR=/path/to/data python scripts/DownloadData.py` — download somewhere else
   (default: `data/raw/` in the repo).
-- `python scripts/download_data.py Twin-2K-500 GSS` — download only some datasets.
+- `python scripts/DownloadData.py Twin-2K-500 GSS` — download only some datasets.
 
 SubPOP is gated (manual approval by the dataset owner). Request access on its dataset page, then
 pass your token as `HF_TOKEN` to download it. Without `HF_TOKEN` the script skips SubPOP with a
@@ -131,19 +131,19 @@ message and downloads the others (~1.08 GB including GSS).
 
 ### Build the training files
 
-`scripts/build_dataset.py` turns the downloaded data into the JSONL files used for fine-tuning. It
+`scripts/BuildDataset.py` turns the downloaded data into the JSONL files used for fine-tuning. It
 reads `Twin-2K-500/`, `Twin-2K-500-Mega-Study/` and `GlobalOpinionQA/` from the data directory
 (GSS, ANES and SubPOP are not used yet) and needs pandas and pyarrow:
 
 ```bash
 pip install pandas pyarrow
-python -I scripts/build_dataset.py
+python -I scripts/BuildDataset.py
 ```
 
 Options:
 
 - `--data-dir /path/to/data` — read the downloads from somewhere else (default: `$DATA_DIR`, or
-  `data/raw/` in the repo, the same place `download_data.py` writes to).
+  `data/raw/` in the repo, the same place `DownloadData.py` writes to).
 - `--out-dir /path/to/output` — write the files somewhere else (default: `<data-dir>/processed/`).
 - `--format messages` — write one `messages` list per example instead of `prompt`/`completion`.
 
