@@ -53,6 +53,26 @@ Half of the pricing products are held out in `eval_pricing.jsonl`. On those prod
 
 A 100-row sample of the training data is in [`samples/train_sample.jsonl`](samples/train_sample.jsonl).
 
+## Model
+
+| | |
+| --- | --- |
+| Base model | [TBD, e.g. Llama 3.1 8B Instruct] |
+| Fine-tuning | LoRA (rank [16], alpha [32], all linear layers) |
+| Trainable parameters | [~42M, about 0.5% of the base model] |
+| Training data | ~186,000 examples from Twin-2K-500 |
+| Hardware | AMD Instinct MI300X, ROCm |
+| Training time | [TBD] |
+
+Results on `eval_pricing.jsonl` (held-out products):
+
+| Model | Accuracy |
+| --- | --- |
+| Base model | [TBD] |
+| Fine-tuned panel | [TBD] |
+| Gemini | [TBD] |
+| Human test-retest ceiling | 84.4% |
+
 ## Further reading
 
 - [Capturing Immediate Reactions to Societal Events: An Event-Triggered Survey Approach](https://www.researchgate.net/publication/414364301_Capturing_Immediate_Reactions_to_Societal_Events_An_Event-Triggered_Survey_Approach): background on survey methodology.
