@@ -1,2 +1,4 @@
 # HACKATHON-AMD-ACT-III
-Hackathon group project
+##Introduction
+Validating a business idea usually takes weeks of surveys and interviews.This project lets founders and product managers test an idea in minutes against a synthetic panel of consumers. Our agents are open models fine-tuned on AMD Instinct GPUs with ROCm, using real survey answers from thousands of people, so they reproduce how different segments actually respond rather than how a chatbot imagines they would. Gemini acts as the teacher that turns a pitch into survey questions, and as the baseline we measure our agents against.The client describes the idea and its target audience. The panel returns how each segment would react, the main objections and a willingness-to-pay estimate, each with an uncertainty range, while a separate search step maps existing competitors. It's a fast first filter, not a replacement for talking to real customers.
+
