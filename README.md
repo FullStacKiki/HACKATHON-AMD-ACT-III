@@ -44,6 +44,7 @@ The panel learns from real answers given by real people, not from text generated
 | Twin-2K-500 | Training, validation and test: answers of 2,058 US respondents to more than 500 questions, including a pricing survey |
 | Twin-2K-500 Mega-Study | Evaluation only, on consumer-style studies |
 | GlobalOpinionQA | Evaluation only, at country level |
+| GSS 2016-2024, ANES 2024 | Downloaded but not used yet: candidates for a second training version (economic and policy attitudes, region and state) |
 | SubPOP | Not used in the current build (gated, optional) |
 
 Each training example pairs a demographic profile and a survey question with the answer a real respondent gave. The files use TRL's conversational prompt/completion format, so the loss is computed on the answer only. Splits are made per question, so no validation or test question appears in training.
@@ -54,7 +55,6 @@ A 100-row sample of the training data is in [`samples/train_sample.jsonl`](sampl
 
 ## Further reading
 
-- [National Financial Capability Study (NFCS)](https://finrafoundation.org/nfcs-data-and-downloads): US survey on financial behavior, a candidate dataset for future versions.
 - [Capturing Immediate Reactions to Societal Events: An Event-Triggered Survey Approach](https://www.researchgate.net/publication/414364301_Capturing_Immediate_Reactions_to_Societal_Events_An_Event-Triggered_Survey_Approach): background on survey methodology.
 
 ## Limitations
@@ -68,8 +68,10 @@ A 100-row sample of the training data is in [`samples/train_sample.jsonl`](sampl
 
 ## Data and licenses
 
-Four public survey datasets from Hugging Face. **Raw data is not committed to this repo**: it is
-downloaded on demand into `data/raw/`, which is git-ignored. Each repo is pinned to a revision, so
+Four public survey datasets from Hugging Face, the General Social Survey (GSS) from NORC, and the
+American National Election Studies (ANES), which must be downloaded by hand. **Raw data is not
+committed to this repo**: it is downloaded on demand into `data/raw/`, which is git-ignored. Each
+Hugging Face repo is pinned to a revision and each GSS file is checked against a recorded size, so
 every run reproduces the same files. Sizes use decimal units (1 MB = 1,000,000 B), like the Hugging
 Face UI, and cover the repo files only (not the `.cache/huggingface/` metadata the downloader writes).
 
@@ -79,10 +81,36 @@ Face UI, and cover the repo files only (not the `.cache/huggingface/` metadata t
 | Twin-2K-500-Mega-Study | [LLM-Digital-Twin/Twin-2K-500-Mega-Study](https://huggingface.co/datasets/LLM-Digital-Twin/Twin-2K-500-Mega-Study) | Apache 2.0 | `0401b715a3` | 287.3 MB (71 files) |
 | SubPOP (gated) | [jjssuh/subpop](https://huggingface.co/datasets/jjssuh/subpop) | CC BY-NC-SA 4.0 (non-commercial) | `886d78a5cb` | 34.6 MB (4 files) |
 | GlobalOpinionQA | [Anthropic/llm_global_opinions](https://huggingface.co/datasets/Anthropic/llm_global_opinions) | CC BY-NC-SA 4.0 (non-commercial) | `cb28804887` | 4.7 MB (3 files) |
+| GSS 1972-2024 cumulative (Stata) | [gss.norc.org](https://gss.norc.org/us/en/gss/get-the-data/stata.html) | [NORC terms and conditions](https://gss.norc.org/us/en/gss/terms-and-conditions.html) (cite, responsible use, data "as is") | Release 3a (July 2026) | 50.9 MB (2 files: `GSS_stata.zip` + 2024 codebook PDF) |
+| ANES (manual download) | [electionstudies.org](https://electionstudies.org/data-center/) | ANES conditions of use (account required; research/statistical use only, no redistribution) | 2024 Time Series 2026-05-19, 2024 Pilot 2024-03-19 | 10.0 MB (2 zip files) |
 
 Revisions are shortened here; the full commit SHAs are pinned in `scripts/download_data.py`.
-Two of the four datasets (SubPOP and GlobalOpinionQA) are non-commercial and share-alike licensed,
-so check the terms before using them in a commercial setting.
+SubPOP and GlobalOpinionQA are licensed CC BY-NC-SA 4.0 (non-commercial, share-alike). ANES may be
+used for research and statistical purposes only and may not be redistributed. The GSS requires the
+citation below. Check these terms before using the data in a commercial setting.
+
+**GSS.** The script downloads the cumulative Stata file and the codebook into `GSS/` without
+extracting them. NORC asks that publications and presentations using GSS data cite:
+
+> Davern, Michael; Bautista, Rene; Freese, Jeremy; Herd, Pamela; and Morgan, Stephen L. General
+> Social Survey 1972-2024. [Machine-readable data file]. Principal Investigator, Michael Davern;
+> Co-Principal Investigators, Rene Bautista, Jeremy Freese, Pamela Herd, and Stephen L. Morgan.
+> NORC ed. Chicago, 2026. 1 datafile and 1 codebook (2024 Release 3a).
+
+and, in non-academic contexts: "The General Social Survey (GSS) is a project of the independent
+research organization NORC at the University of Chicago, with principal funding from the National
+Science Foundation."
+
+**ANES.** Not downloaded by the script, because it requires a login: create an account on
+[electionstudies.org](https://electionstudies.org/data-center/), accept the conditions of use, and
+download these CSV packages by hand into `ANES/`, without extracting them:
+
+- `anes_timeseries_2024_csv_20260519.zip` (2024 Time Series, main source, 6.5 MB)
+- `anes_pilot_2024_csv_20240319.zip` (2024 Pilot Study, secondary, 3.5 MB)
+
+The ANES files may not be redistributed, so never commit them. Citation: American National Election
+Studies. 2026. ANES 2024 Time Series Study Full Release [dataset and documentation]. May 19, 2026
+version. www.electionstudies.org
 
 ### Download everything
 
@@ -95,20 +123,41 @@ Options:
 
 - `DATA_DIR=/path/to/data python scripts/download_data.py` — download somewhere else
   (default: `data/raw/` in the repo).
-- `python scripts/download_data.py Twin-2K-500 GlobalOpinionQA` — download only some datasets.
+- `python scripts/download_data.py Twin-2K-500 GSS` — download only some datasets.
 
 SubPOP is gated (manual approval by the dataset owner). Request access on its dataset page, then
 pass your token as `HF_TOKEN` to download it. Without `HF_TOKEN` the script skips SubPOP with a
-message and downloads the other three (~1.02 GB).
+message and downloads the others (~1.08 GB including GSS).
 
 ### Build the training files
 
+`scripts/build_dataset.py` turns the downloaded data into the JSONL files used for fine-tuning. It
+reads `Twin-2K-500/`, `Twin-2K-500-Mega-Study/` and `GlobalOpinionQA/` from the data directory
+(GSS, ANES and SubPOP are not used yet) and needs pandas and pyarrow:
+
 ```bash
 pip install pandas pyarrow
-python scripts/build_dataset.py --data-dir data/raw --out-dir data/processed
+python -I scripts/build_dataset.py
 ```
 
-This writes `train.jsonl`, `val.jsonl`, `test.jsonl`, `test_partial.jsonl`, `eval_pricing.jsonl`,
-`eval_megastudy.jsonl`, `eval_globalopinionqa.jsonl`, `tabular.csv` and `DATA.md` into
-`data/processed/`, which is git-ignored. All sampling uses fixed seeds, so every run produces
-identical files. `DATA.md` lists row counts, splits and the exact command used.
+Options:
+
+- `--data-dir /path/to/data` — read the downloads from somewhere else (default: `$DATA_DIR`, or
+  `data/raw/` in the repo, the same place `download_data.py` writes to).
+- `--out-dir /path/to/output` — write the files somewhere else (default: `<data-dir>/processed/`).
+- `--format messages` — write one `messages` list per example instead of `prompt`/`completion`.
+
+All sampling uses fixed seeds, so the same input gives the same output. Files written to the output
+directory:
+
+| File | Contents |
+| --- | --- |
+| `train.jsonl`, `val.jsonl`, `test.jsonl` | Twin-2K-500 examples, split per question (~80/10/10) |
+| `test_partial.jsonl` | The test set with a reduced profile (age, sex, education, income, region) |
+| `eval_pricing.jsonl` | The held-out pricing products, with the wave 4 answer for test-retest |
+| `eval_megastudy.jsonl` | Evaluation on Twin-2K-500 Mega-Study |
+| `eval_globalopinionqa.jsonl` | Country-level evaluation on GlobalOpinionQA (target is an answer distribution) |
+| `tabular.csv` | The same Twin rows as a table, for a CatBoost baseline |
+| `DATA.md` | Counts, splits, test-retest agreement and loading instructions |
+
+It also rewrites the 100-row sample in `samples/train_sample.jsonl` (change it with `--sample-out`).

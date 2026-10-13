@@ -1,7 +1,9 @@
 """Download the survey datasets as-is (no conversion), one folder per dataset.
 
-Each repo is pinned to the revision recorded below, so a later run reproduces
-the same files. Nothing is committed to the repo: the destination is ignored by
+Each Hugging Face repo is pinned to the revision recorded below, so a later run
+reproduces the same files. Files fetched from a fixed URL (GSS) are checked
+against the size recorded below; a mismatch is reported as an error. Archives
+are never extracted. Nothing is committed to the repo: the destination is ignored by
 git (see .gitignore).
 
 Usage:
@@ -21,7 +23,9 @@ Exit codes: 0 ok (skipping a gated repo is ok), 4 access denied by a gate,
 1 other error.
 """
 import os
+import shutil
 import sys
+import urllib.request
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
@@ -38,11 +42,22 @@ DATASETS = [
      "cb2880488749218abb81802a94c2c62ebfde2f35", False),
 ]
 
+# destination subdir -> [(url, file name, expected size in bytes)]
+DIRECT = {
+    "GSS": [
+        ("https://gss.norc.org/content/dam/gss/get-the-data/documents/stata/GSS_stata.zip",
+         "GSS_stata.zip", 47_562_980),
+        ("https://gss.norc.org/content/dam/gss/get-documentation/pdf/codebook/"
+         "GSS%202024%20Codebook%20R3a.pdf",
+         "GSS 2024 Codebook R3a.pdf", 3_356_354),
+    ],
+}
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 dest_root = Path(os.environ.get("DATA_DIR") or REPO_ROOT / "data" / "raw")
 
 wanted = sys.argv[1:]
-known = {sub for _, sub, _, _ in DATASETS}
+known = {sub for _, sub, _, _ in DATASETS} | set(DIRECT)
 unknown = [w for w in wanted if w not in known]
 if unknown:
     sys.exit(f"unknown dataset(s): {', '.join(unknown)} (known: {', '.join(sorted(known))})")
@@ -78,5 +93,34 @@ for repo_id, sub, sha, gated in DATASETS:
             rc = rc or 1
         continue
     print("   done", flush=True)
+
+for sub, files in DIRECT.items():
+    if wanted and sub not in wanted:
+        continue
+    target = dest_root / sub
+    target.mkdir(parents=True, exist_ok=True)
+    for url, name, size in files:
+        path = target / name
+        print(f"-> {url}  =>  {path}", flush=True)
+        if path.exists() and path.stat().st_size == size:
+            print("   already present, size ok")
+            continue
+        tmp = path.with_name(path.name + ".part")
+        try:
+            with urllib.request.urlopen(url) as resp, open(tmp, "wb") as out:
+                shutil.copyfileobj(resp, out)
+        except Exception as e:
+            print(f"   FAILED: {type(e).__name__}: {str(e)[:300]}")
+            tmp.unlink(missing_ok=True)
+            rc = rc or 1
+            continue
+        got = tmp.stat().st_size
+        if got != size:
+            print(f"   FAILED: size {got} B, expected {size} B (file changed upstream?)")
+            tmp.unlink()
+            rc = rc or 1
+            continue
+        tmp.replace(path)
+        print(f"   done ({size:,} B)", flush=True)
 
 sys.exit(rc)
