@@ -19,11 +19,15 @@ What is used (Twin-2K-500, question_catalog.json + wave1_3_response.csv):
   - single-answer MC (SAVR/SAHR): every answer is kept;
   - Matrix rows (Likert and Bipolar): at most --max-per-qid rows per QID,
     sampled across items and people;
-  - pricing study (QID9_1-QID9_40): half of the products go to train, the
-    other half to eval_pricing.jsonl, with the wave 4 answer for test-retest.
-Excluded: demographics (they form the profile), multi-answer MC, text entry,
-sliders and descriptive blocks. Missing answers (questions a respondent did
-not see) and "don't know" / "refused" options are dropped.
+  - pricing study: one example per (respondent, product) with the product and
+    price that respondent saw, read from the raw Qualtrics exports (see
+    pricing_records). Half of the products go to train, the other half to
+    eval_pricing.jsonl, with the wave 4 answer for test-retest.
+Excluded: demographics (they form the profile), ability/knowledge tests (the
+"Cognitive tests" block: puzzles, vocabulary, syllogisms, financial literacy),
+the Beck Anxiety Inventory, multi-answer MC, text entry, sliders and
+descriptive blocks. Missing answers (questions a respondent did not see) and
+"don't know" / "refused" options are dropped.
 
 Splits are made per question: questions are grouped into families (each QID,
 with the between-subject variants of one experiment kept together) and the
@@ -75,6 +79,15 @@ DEMOGRAPHICS = [
 # reduced profile: age, sex, education, income, region
 PARTIAL = ["QID13", "QID12", "QID14", "QID21", "QID11"]
 DEMO_LABEL = dict(DEMOGRAPHICS)
+# "Pacific (HI, AK)" is a 5th region option (16 people); the Census West includes HI and AK
+REGION_MERGE = {"Pacific": "West"}
+
+# questions with an objectively correct answer (matrix and figure puzzles, cube
+# rotation, synonyms/antonyms, syllogisms, financial literacy): the whole block
+ABILITY_BLOCKS = {"Cognitive tests"}
+# clinical symptom scales: QID125 = Beck Anxiety Inventory (the BDI is multi-answer, already out)
+CLINICAL_QIDS = {"QID125"}
+PRICING_BLOCK = "Product Preferences - Pricing"
 
 # between-subject variants of the same experiment share one split family
 FAMILY_PREFIXES = [
@@ -132,10 +145,11 @@ def load_units(catalog):
         qtype, sel = q["QuestionType"], q.get("Settings", {}).get("Selector")
         block = q["BlockName"].strip()
         stem = clean(q.get("QuestionText", ""))
-        if block == "Demographics" or not stem:
+        if (block in ("Demographics", PRICING_BLOCK) or block in ABILITY_BLOCKS
+                or q["QuestionID"] in CLINICAL_QIDS or not stem):
             continue
         if qtype == "MC" and sel in ("SAVR", "SAHR"):
-            kind = "pricing" if block.startswith("Product Preferences") else "mc"
+            kind = "mc"
             opts = [clean(o) for o in q["Options"]]
             items = [(c, stem, opts) for c in q["csv_columns"]]
         elif qtype == "Matrix" and sel in ("Likert", "Bipolar"):
@@ -170,7 +184,8 @@ def profiles(w13, catalog):
         vals = {}
         for qid, _ in DEMOGRAPHICS:
             v = opts[qid][int(r[qid]) - 1]
-            vals[qid] = re.sub(r"\s*\(.*\)$", "", v)  # "South (TX, OK, ...)" -> "South"
+            v = re.sub(r"\s*\(.*\)$", "", v)  # "South (TX, OK, ...)" -> "South"
+            vals[qid] = REGION_MERGE.get(v, v) if qid == "QID11" else v
         demo[int(r["pid"])] = vals
     return demo
 
@@ -180,10 +195,9 @@ def profile_text(vals, which):
     return "; ".join(f"{DEMO_LABEL[q]}: {vals[q]}" for q in qids)
 
 
-def twin_records(units, w13, w4, max_per_qid, seed, stats):
+def twin_records(units, w13, max_per_qid, seed, stats):
     """Answer pairs per unit, with Matrix units capped at max_per_qid."""
     pids = w13["pid"].astype(int).tolist()
-    w4 = w4.set_index("pid")
     out = {}
     for u in units:
         recs = []
@@ -196,19 +210,91 @@ def twin_records(units, w13, w4, max_per_qid, seed, stats):
                 if pos is None:
                     stats["dk_refused", u["kind"]] += 1
                     continue
-                rec = {"pid": pid, "unit": u["unit"], "qid": u["qid"], "item": col,
-                       "kind": u["kind"], "block": u["block"], "family": u["family"],
-                       "question": question, "options": opts, "answer": pos}
-                if u["kind"] == "pricing":
-                    w = w4.at[pid, col] if col in w4.columns else float("nan")
-                    rec["answer_wave4"] = None if pd.isna(w) else LETTERS[int(w) - 1]
-                recs.append(rec)
+                recs.append({"pid": pid, "unit": u["unit"], "qid": u["qid"], "item": col,
+                             "kind": u["kind"], "block": u["block"], "family": u["family"],
+                             "question": question, "options": opts, "answer": pos})
         if u["kind"] in ("likert", "bipolar") and len(recs) > max_per_qid:
             stats["capped_out", u["kind"]] += len(recs) - max_per_qid
             recs = random.Random(f"{seed}-cap-{u['unit']}").sample(recs, max_per_qid)
             recs.sort(key=lambda r: (r["item"], r["pid"]))
         out[u["unit"]] = recs
     return out
+
+
+PRICE_RE = re.compile(r"(\d+):\$([\d.]+(?: \(product is free\))?)")
+PRICING_Q = ("Please consider the following product category: {category}. Suppose you are in a grocery "
+             "store, and you see the following product in that category: {product} The product is "
+             "priced at: ${price}. Would you or would you not purchase this product?")
+
+
+def pricing_records(twin_dir, catalog, stats):
+    """Pricing examples with the product and price each respondent actually saw.
+
+    Products and prices were randomized per respondent (40 products, each at 0x-2x a
+    reference price; 0x is shown as "$0 (product is free)"). The catalog text of QID9_k
+    is one respondent's version, so it is not used for the others. Per respondent, the
+    embedded field randDollarsString lists "product:price" in display order. Wave 3
+    answer columns ("<product>_choice questions") are indexed by product, wave 4 columns
+    ("<slot>_Q295") by display slot. A few strings list a product twice with two prices:
+    that product's price is unknown and every later slot is misaligned, so the product is
+    dropped and wave 4 answers are kept only before the first repeated product.
+    Wave 3 and wave 4 answers are paired on (person, product, price).
+    """
+    raw = twin_dir / "raw_data"
+    w3 = pd.read_csv(raw / "wave_3_labels_anonymized.csv", low_memory=False).iloc[2:]  # 2 header rows
+    w4 = pd.read_csv(raw / "wave_4_labels_anonymized.csv", low_memory=False).iloc[2:]
+    w4 = w4.set_index(w4["TWIN_ID"].astype(int))
+    # product index -> (category, name): QID9_k in the catalog is respondent 1's slot k
+    first = PRICE_RE.findall(str(w3.loc[w3["TWIN_ID"].astype(int) == 1, "randDollarsString"].iloc[0]))
+    cat_q = {q["QuestionID"]: q for q in catalog if q["BlockName"].strip() == PRICING_BLOCK}
+    options = [clean(o) for o in cat_q["QID9_1"]["Options"]]
+    products = {}
+    for k, (i, _) in enumerate(first, 1):
+        m = re.search(r"category: (.*?)\. Suppose .* in that category: (.*?) The product is priced",
+                      clean(cat_q[f"QID9_{k}"]["QuestionText"]))
+        products[int(i)] = m.groups()
+    assert len(products) == 40, len(products)
+
+    def slots(s):
+        seq = [(int(i), p) for i, p in PRICE_RE.findall(str(s))]
+        count = collections.Counter(i for i, _ in seq)
+        cut = next((k for k, (i, _) in enumerate(seq) if count[i] > 1), len(seq))
+        return seq, count, cut
+
+    def answer(v):
+        return options.index(clean(v)) if isinstance(v, str) and clean(v) in options else None
+
+    by_unit = collections.defaultdict(list)
+    for _, r in w3.iterrows():
+        pid = int(r["TWIN_ID"])
+        seq, count, cut = slots(r["randDollarsString"])
+        if pid in w4.index:
+            seq4, _, cut4 = slots(w4.at[pid, "randDollarsString"])
+            shown4 = {seq4[k]: w4.at[pid, f"{k + 1}_Q295"] for k in range(min(cut4, 40))}
+        else:
+            shown4 = {}
+        for i in [i for i in count if count[i] > 1]:
+            stats["unrecoverable_price", "pricing"] += 1  # one row per (person, product)
+        for i, price in seq:
+            if count[i] > 1:
+                continue
+            pos = answer(r[f"{i}_choice questions"])
+            if pos is None:
+                stats["missing", "pricing"] += 1
+                continue
+            a4 = answer(shown4.get((i, price)))
+            stats["wave4_pair" if a4 is not None else "wave4_unmatched"] += 1
+            category, product = products[i]
+            unit = f"QID9_P{i:02d}"
+            by_unit[unit].append({
+                "pid": pid, "unit": unit, "qid": "QID9", "item": unit, "kind": "pricing",
+                "block": PRICING_BLOCK, "family": unit, "product": product, "price": price,
+                "question": PRICING_Q.format(category=category, product=product, price=price),
+                "options": options, "answer": pos,
+                "answer_wave4": None if a4 is None else LETTERS[a4]})
+    units = [{"qid": "QID9", "unit": f"QID9_P{i:02d}", "kind": "pricing", "block": PRICING_BLOCK,
+              "family": f"QID9_P{i:02d}", "product": products[i][1]} for i in sorted(products)]
+    return units, by_unit
 
 
 def assign_splits(units, seed):
@@ -224,8 +310,8 @@ def assign_splits(units, seed):
         n_val = n_test = max(1, round(0.1 * len(fams)))
         for i, f in enumerate(fams):
             split_of_family[f] = "val" if i < n_val else "test" if i < n_val + n_test else "train"
-    pricing = sorted((u["unit"] for u in units if u["kind"] == "pricing"),
-                     key=lambda s: int(s.split("_")[1]))
+    # pricing units are products (not QID9 slots), so no product is in both train and eval_pricing
+    pricing = sorted(u["unit"] for u in units if u["kind"] == "pricing")
     random.Random(f"{seed}-pricing").shuffle(pricing)
     half = len(pricing) // 2
     split_of_unit = {}
@@ -368,11 +454,13 @@ def main():
     twin = args.data_dir / "Twin-2K-500" / "question_catalog_and_human_response_csv"
     catalog = json.load(open(twin / "question_catalog.json"))
     w13 = pd.read_csv(twin / "wave1_3_response.csv", low_memory=False)
-    w4 = pd.read_csv(twin / "wave4_response.csv", low_memory=False)
     demo = profiles(w13, catalog)
     units = load_units(catalog)
+    by_unit = twin_records(units, w13, args.max_per_qid, args.seed, stats)
+    pricing_units, pricing_by_unit = pricing_records(args.data_dir / "Twin-2K-500", catalog, stats)
+    units += pricing_units
+    by_unit.update(pricing_by_unit)
     split_of = assign_splits(units, args.seed)
-    by_unit = twin_records(units, w13, w4, args.max_per_qid, args.seed, stats)
 
     splits = collections.defaultdict(list)
     for u in units:
@@ -394,8 +482,8 @@ def main():
             row.update({k: rec[k] for k in ("pid", "qid", "item", "kind", "block")})
             row["n_options"] = len(rec["options"])
             row["profile"] = profile
-            if "answer_wave4" in rec:
-                row["answer_wave4"] = rec["answer_wave4"]
+            if rec["kind"] == "pricing":
+                row.update({k: rec[k] for k in ("product", "price", "answer_wave4")})
         return row
 
     files = {
@@ -456,7 +544,7 @@ def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
            f"--partial-frac {args.partial_frac} --seed {args.seed} --format {args.format}")
     cols = "`messages`" if args.format == "messages" else "`prompt` + `completion`"
     kind_names = ["mc", "likert", "bipolar", "pricing"]
-    dk_units = [u["unit"] for u in units if any(DK_RE.search(o) for _, _, opts in u["items"] for o in opts)]
+    dk_units = [u["unit"] for u in units if any(DK_RE.search(o) for _, _, opts in u.get("items", []) for o in opts)]
     md = ["# Processed survey data", "",
           "Built by `scripts/build_dataset.py` (repo HACKATHON-AMD-ACT-III). Regenerate everything with:", "",
           "```bash", "cd <repo>", cmd, "```", "",
@@ -499,17 +587,28 @@ def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
            "`question_catalog.json`, never the numeric codes.",
            "- Single-answer MC questions are kept whole. Each Matrix QID is capped at "
            f"{args.max_per_qid:,} rows, sampled across its items and respondents.",
-           "- Excluded: the 14 demographic questions (they are the profile), multi-answer MC "
-           "(BDI items, Wason selection), text entry, sliders, descriptive blocks.",
+           "- Excluded: the 14 demographic questions (they are the profile); questions with an objectively "
+           "correct answer (the whole *Cognitive tests* block: matrix and figure puzzles, cube rotation, "
+           "synonyms/antonyms, syllogisms and logic problems, financial literacy; numeracy and CRT are text "
+           "entry); the clinical Beck Anxiety Inventory (QID125); multi-answer MC (BDI items, Wason "
+           "selection), text entry, sliders, descriptive blocks.",
+           "- Region: the 5th option *Pacific (HI, AK)* is merged into *West* (Census definition), so "
+           "profiles use Northeast / Midwest / South / West.",
            "- Dropped: missing answers (between-subject conditions a respondent did not see) and "
-           "\"don't know\" / \"refused\" answers; those options are also removed from the option list "
-           f"(Twin-2K-500: the \"Do not know\" option of {', '.join(dk_units) or 'none'}).",
+           "\"don't know\" / \"refused\" answers; those options are also removed from the option list"
+           + (f" (Twin-2K-500: the \"Do not know\" option of {', '.join(dk_units)})." if dk_units else "."),
            "- Split per question: QIDs are grouped into families (the between-subject variants of one "
            "experiment, e.g. *Anchoring - redwood high/low*, stay together) and families are split "
            "80/10/10 within each question type (mc, likert, bipolar). No val/test question appears in train.",
-           "- Pricing (QID9_1-QID9_40; the intro QID8 has no answer): half of the products in train, "
-           "the other half in `eval_pricing.jsonl`, never in val/test. `answer_wave4` is the same "
-           "person's answer two weeks later (test-retest).",
+           "- Pricing: products and prices were randomized per respondent (40 products, each at 0x-2x a "
+           "reference price in steps of 0.2x; 0x was shown as \"$0 (product is free)\"), so the catalog "
+           "text of QID9_k (one respondent's version) is not used. Each row shows the product and price "
+           "that respondent saw, from `randDollarsString` in `raw_data/wave_3_labels_anonymized.csv`. "
+           "Units are products (`QID9_P01`-`QID9_P40`, the survey's product index): half of the products "
+           "in train, the other half in `eval_pricing.jsonl`, never in val/test, so no product is in both. "
+           "Respondents whose string lists a product twice (two prices) lose that product "
+           "(`unrecoverable_price` below). `answer_wave4` is the same person's answer two weeks later for "
+           "the same product at the same price (null when wave 4 cannot be matched).",
            f"- Profiles: the full profile lists all 14 demographics. In {args.partial_frac:.0%} of the train "
            "examples the profile is reduced to age, sex, education, income and region. Val and test use the "
            "full profile; `test_partial.jsonl` is the test set with the reduced profile.",
@@ -517,11 +616,13 @@ def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
            "metadata (`pid`, `qid`, `item`, `kind`, ...).", ""]
     prof = collections.Counter(r["profile"] for r in splits["train"])
     md += [f"Train profiles: {prof['full']:,} full, {prof['partial']:,} partial.", ""]
-    ep = splits["eval_pricing"]
-    agree = [r["answer_wave4"] == LETTERS[r["answer"]] for r in ep if r.get("answer_wave4")]
-    if agree:
-        md += [f"Pricing test-retest agreement (wave 4 vs waves 1-3, held-out products): "
-               f"{sum(agree) / len(agree):.1%} over {len(agree):,} pairs.", ""]
+    for name, label in (("eval_pricing", "held-out products"), ("train", "train products")):
+        recs = [r for r in splits[name] if r["kind"] == "pricing"]
+        agree = [r["answer_wave4"] == LETTERS[r["answer"]] for r in recs if r.get("answer_wave4")]
+        if agree:
+            md += [f"Pricing test-retest agreement ({label}; wave 4 vs waves 1-3, same person, product and "
+                   f"price): {sum(agree) / len(agree):.1%} over {len(agree):,} matched pairs "
+                   f"({len(recs) - len(agree):,} rows unmatched).", ""]
 
     md += ["### Questions per split", ""]
     by_split = collections.defaultdict(list)
@@ -534,10 +635,11 @@ def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
         rows.append([s, len(us), len({u['family'] for u in us}),
                      f"{len(splits[s]):,}"] + [c.get(k, 0) for k in kind_names])
     md += [table(["split", "QIDs", "families", "rows"] + [f"{k} QIDs" for k in kind_names], rows), ""]
-    for s in ("val", "test", "eval_pricing"):
+    for s in ("val", "test"):
         md += [f"**{s}**: " + ", ".join(f"{u['unit']} ({u['block']})" for u in by_split[s]), ""]
-    md += ["**train pricing products**: " + ", ".join(
-        u["unit"] for u in by_split["train"] if u["kind"] == "pricing"), ""]
+    for s in ("train", "eval_pricing"):
+        md += [f"**{s} pricing products**: " + "; ".join(
+            f"{u['unit']} {u['product'].rstrip('.')}" for u in by_split[s] if u["kind"] == "pricing"), ""]
 
     md += ["### Dropped answers", "",
            table(["reason", "type", "count"],
