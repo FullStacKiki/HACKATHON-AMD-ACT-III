@@ -35,6 +35,11 @@ Every estimate comes with an uncertainty range.
 | Real survey data | Ground truth for fine-tuning |
 | Gemini | Teacher (pitch → survey questions) and baseline we measure against |
 
+## Resources used to train the model
+https://finrafoundation.org/nfcs-data-and-downloads 
+https://www.researchgate.net/publication/414364301_Capturing_Immediate_Reactions_to_Societal_Events_An_Event-Triggered_Survey_Approach
+
+
 ## Limitations
 
 This is a fast first filter, not a replacement for talking to real customers.
