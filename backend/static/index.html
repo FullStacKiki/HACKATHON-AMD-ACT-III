@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VibeCheck AI | AMD Instinct ROCm Business Viability Platform</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Schibsted Grotesk font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- React & Babel Standalone -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { font-family: 'Schibsted Grotesk', system-ui, -apple-system, sans-serif; }
+    .ripple { transform-box: fill-box; transform-origin: center; animation: ripple 1.6s ease-out forwards; }
+    @keyframes ripple { from { transform: scale(1); opacity: .9; } to { transform: scale(9); opacity: 0; } }
+    @keyframes fA { 0% { fill: #d64545; } 33% { fill: #e8b422; } 66% { fill: #2f9e5b; } }
+    @keyframes fB { 0% { fill: #2f9e5b; } 33% { fill: #d64545; } 66% { fill: #e8b422; } }
+    @keyframes fC { 0% { fill: #e8b422; } 33% { fill: #2f9e5b; } 66% { fill: #d64545; } }
+    @keyframes reveal { 0% { fill: #cfd8de; r: 2.6; } 55% { r: 4.6; } 100% { r: 2.8; } }
+    @media (prefers-reduced-motion: reduce) {
+      .ripple { animation: none; opacity: 0; }
+      .flick { animation: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, memo } = React;
+
+    // ---------- Dot map geometry ----------
+    const W = 800, H = 306;
+    const px = (lon) => ((lon + 170) / 350) * W;
+    const py = (lat) => ((78 - lat) / 134) * H;
+
+    const REGIONS = {
+      "North America": [[[-166,64],[-163,69],[-156,71],[-141,69.5],[-128,70],[-115,68],[-96,68],[-94,62],[-94,59],[-92,57],[-85,55],[-82,52],[-80,51.5],[-79,55],[-77,60],[-78,62],[-72,61],[-65,60],[-62,57],[-56,52],[-59,48],[-64,49],[-66,45],[-70,43],[-74,40],[-76,37],[-76,35],[-81,31],[-80,26],[-81.5,25.5],[-83,29],[-85,30],[-89,30],[-94,29],[-97,26],[-98,22],[-96,19],[-91,19],[-90,21],[-87,21],[-88,16],[-84,15],[-83,10],[-79,9],[-78,8],[-80,7.5],[-84,9],[-87,13],[-92,14],[-96,16],[-105,20],[-106,23],[-110,25],[-111,27],[-113,30],[-115,32],[-117,32],[-121,35],[-124,40],[-124,46],[-124,48],[-128,51],[-133,56],[-138,59],[-146,61],[-152,59],[-158,57],[-163,55],[-158,58],[-162,60],[-165,62]],[[-73,78],[-60,82],[-30,83],[-20,80],[-20,72],[-24,69],[-32,68],[-42,60],[-50,62],[-54,67],[-58,75],[-66,76]],[[-85,22],[-79,23],[-74,20],[-77,19.5],[-82,22]]],
+      "South America": [[[-78,8],[-77,10],[-72,12],[-67,11],[-62,10.5],[-60,8],[-57,6],[-52,5],[-50,0],[-48,-1],[-44,-2.5],[-38,-4],[-35,-6],[-35,-9],[-39,-14],[-39,-18],[-41,-22],[-44,-23],[-48,-26],[-49,-29],[-53,-34],[-57,-36],[-57,-39],[-62,-39],[-65,-42],[-67,-46],[-69,-51],[-68,-55],[-72,-54],[-75,-50],[-74,-44],[-73,-38],[-71,-30],[-70,-23],[-70,-18],[-76,-14],[-80,-7],[-81,-4],[-80,-1],[-78,2],[-77,4]]],
+      "Europe": [[[-9,37],[-9,43],[-2,43.5],[-1,46],[-4,48],[2,51],[5,53],[8,54],[9,57],[11,54],[14,54],[19,54.5],[21,57],[24,59],[30,60],[34,65],[40,67],[45,68],[60,69],[60,55],[50,50],[48,46],[44,45],[40,46],[38,47],[34,46],[30,46],[28,44],[28,42],[26,41],[24,40.5],[23,38],[22,37],[21,38],[20,40],[19,42],[14,45],[12.5,44.5],[14,42],[16,41],[18,40.3],[16,38],[15,40],[12,42],[10,44],[7,43.5],[3,43],[0,39],[-2,37],[-5,36]],[[5,59],[5,62],[10,64],[14,68],[18,70],[25,71],[30,70],[30,66],[30,62],[30,60],[24,60],[22,61],[21,63],[25,65],[22,66],[18,63],[17,60],[19,59],[16,56],[13,55.5],[11,58],[8,58]],[[-5,50],[1,51],[2,53],[0,54],[-2,56],[-2,58],[-5,59],[-6,57],[-5,55],[-3,54],[-5,52]],[[-10,52],[-6,52],[-6,55],[-8,55],[-10,54]],[[-24,64],[-14,64],[-14,66],[-22,66]]],
+      "Africa": [[[-17,21],[-16,24],[-13,28],[-10,30],[-9,33],[-6,36],[0,36],[10,37],[11,34],[15,32],[20,31],[25,32],[32,31],[34,28],[33,29],[35,24],[37,20],[39,16],[43,12],[51,12],[51,10],[48,5],[42,-1],[40,-5],[39,-8],[40,-11],[41,-15],[36,-19],[35,-24],[32,-26],[32,-29],[28,-33],[24,-34],[20,-35],[18,-33],[16,-28],[14,-22],[12,-16],[13,-11],[12,-6],[9,-1],[10,3],[9,4],[5,6],[2,6],[-2,5],[-8,4.5],[-12,7],[-15,11],[-17,14]],[[44,-25],[47,-25],[50,-15],[49,-12],[44,-17]]],
+      "Asia": [[[26,40],[26,37],[30,36],[36,36],[36,33],[35,30],[35,28],[38,24],[41,17],[43,13],[45,13],[52,16],[56,18],[59,22],[56,26],[51,24],[50,27],[48,29],[50,30],[56,27],[58,25],[62,25],[66,25],[68,23],[72,21],[73,16],[76,9],[78,8],[80,11],[80,15],[85,20],[88,22],[91,22],[94,17],[98,16],[98,10],[100,7],[103,2],[104,1.5],[103,5],[100,13],[102,12],[105,9],[108,11],[109,15],[106,20],[108,22],[112,22],[117,24],[121,28],[122,31],[120,35],[119,38],[122,40],[125,40],[126,37],[127,35],[129,35.5],[129,40],[132,43],[135,44],[140,49],[141,53],[137,54],[143,59],[150,59],[156,57],[162,57],[163,60],[170,60],[178,63],[180,67],[170,70],[160,70],[145,72],[130,71],[113,74],[100,77],[90,75],[80,73],[70,73],[65,69],[60,69],[60,55],[50,50],[48,46],[45,44],[40,44],[37,45],[41,41],[36,41],[32,42],[29,41]],[[130,31],[132,34],[135,34],[140,35],[141,38],[142,40],[141,41.5],[140,40],[139,38],[136,37],[133,35],[131,34]],[[140,42],[142,43],[145,43.5],[142,45.5],[140,43.5]],[[95,5],[98,4],[104,-2],[106,-6],[102,-4],[96,2]],[[105,-6],[114,-7],[114,-8.5],[106,-7.5]],[[109,2],[112,3],[117,7],[119,5],[116,-3],[111,-3.5],[109,-1]],[[120,18],[122,18],[124,12],[126,7],[122,7],[121,14]]],
+      "Oceania": [[[114,-22],[114,-26],[115,-34],[118,-35],[124,-33.5],[131,-31.5],[135,-35],[138,-35],[140,-38],[146,-39],[150,-37],[153,-31],[153,-25],[146,-19],[145,-15],[142,-11],[141,-17],[136,-12],[131,-11],[129,-15],[125,-14],[122,-18]],[[131,-1],[138,-2],[145,-5],[150,-10],[142,-9],[138,-8],[132,-4]],[[173,-35],[178,-38],[175,-41],[173,-39]],[[172,-41],[174,-42],[170,-46.5],[167,-46],[171,-43]]],
+    };
+    const WATER = [[[28,42],[28,45],[33,46],[38,47],[41,43],[41,41],[35,41.5]],[[47,45],[51,47],[54,45],[54,41],[54,37],[50,37],[49,40],[47,43]]];
+
+    const inRing = (lon, lat, poly) => {
+      let c = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, yi] = poly[i], [xj, yj] = poly[j];
+        if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) c = !c;
+      }
+      return c;
+    };
+
+    const DOTS = [];
+    for (let lat = 76; lat > -56; lat -= 3) {
+      for (let lon = -168; lon < 178; lon += 3) {
+        if (WATER.some((w) => inRing(lon, lat, w))) continue;
+        for (const [name, rings] of Object.entries(REGIONS)) {
+          if (rings.some((r) => inRing(lon, lat, r))) {
+            DOTS.push({
+              x: px(lon), y: py(lat), region: name,
+              k: ["fA", "fB", "fC"][Math.floor(Math.random() * 3)],
+              dur: 350 + Math.random() * 750,
+              del: -Math.random() * 1100
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    const colorOf = (n) => (n < 33.3 ? "#d64545" : n < 66.6 ? "#e8b422" : "#2f9e5b");
+    const tone = (s) =>
+      s >= 66.6 ? { c: "#2f7d4f", bg: "#e6f2ea", label: "Strong" }
+      : s >= 33.3 ? { c: "#a86a0c", bg: "#fbf0dc", label: "Needs work" }
+      : { c: "#b23a3a", bg: "#f9e5e5", label: "At risk" };
+    const clamp = (n) => Math.min(100, Math.max(0, Math.round(n)));
+
+    // ---------- Gauge Component ----------
+    const ZONES = [
+      { from: 0, to: 33.3, color: "#d64545" },
+      { from: 33.3, to: 66.6, color: "#e8b422" },
+      { from: 66.6, to: 100, color: "#2f9e5b" },
+    ];
+    const arcPoint = (pct, r = 90) => {
+      const a = ((-90 + (pct / 100) * 180) * Math.PI) / 180;
+      return `${(120 + r * Math.sin(a)).toFixed(2)} ${(120 - r * Math.cos(a)).toFixed(2)}`;
+    };
+
+    function Gauge({ mode, score }) {
+      const [v, setV] = useState(0);
+      useEffect(() => {
+        if (mode === "result") { setV(score); return; }
+        if (mode === "idle") { setV(0); return; }
+        let raf;
+        const t0 = performance.now();
+        const loop = (t) => {
+          setV(50 + 46 * Math.sin(((t - t0) / 1700) * 2 * Math.PI - Math.PI / 2));
+          raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+        return () => cancelAnimationFrame(raf);
+      }, [mode, score]);
+
+      const zoneColor = (ZONES.find((z) => score <= z.to) || ZONES[2]).color;
+      const transition = mode === "result" ? "transform 1100ms cubic-bezier(.25,1.5,.5,1)" : mode === "idle" ? "transform 500ms ease-out" : "none";
+
+      return (
+        <svg viewBox="0 0 240 150" className="w-full max-w-xs" role="img">
+          {ZONES.map((z) => {
+            const active = mode === "result" && score >= z.from && score <= z.to;
+            return (
+              <path
+                key={z.color}
+                d={`M${arcPoint(z.from + 0.8)} A90 90 0 0 1 ${arcPoint(z.to - 0.8)}`}
+                fill="none" stroke={z.color} strokeWidth="14"
+                style={{ opacity: mode === "idle" ? 0.28 : mode === "result" && !active ? 0.35 : 1, transition: "opacity 400ms" }}
+              />
+            );
+          })}
+          {Array.from({ length: 11 }, (_, i) => {
+            const a = ((-90 + i * 18) * Math.PI) / 180;
+            return (
+              <line key={i}
+                x1={120 + 72 * Math.sin(a)} y1={120 - 72 * Math.cos(a)}
+                x2={120 + 80 * Math.sin(a)} y2={120 - 80 * Math.cos(a)}
+                stroke="#64748b" strokeWidth={i % 5 === 0 ? 2.5 : 1.2}
+              />
+            );
+          })}
+          <g style={{ transformOrigin: "120px 120px", transform: `rotate(${-90 + (v / 100) * 180}deg)`, transition }}>
+            <path d="M117 120 L120 46 L123 120 Z" fill="#14212b" />
+          </g>
+          <circle cx="120" cy="120" r="8" fill="#14212b" />
+          <text x="120" y="146" textAnchor="middle" fontSize={mode === "result" ? 22 : 14} fontWeight="800" fill={mode === "result" ? zoneColor : "#475569"}>
+            {mode === "result" ? Math.round(score) : mode === "scan" ? "Analyzing…" : "Ready"}
+          </text>
+        </svg>
+      );
+    }
+
+    // ---------- DotMap Component ----------
+    const DotMap = memo(function DotMap({ mode, pulses, sources = [] }) {
+      const final = useMemo(() => {
+        return DOTS.map((d) => {
+          let best = null, bd = Infinity;
+          sources.forEach((s) => {
+            if (s.region !== d.region) return;
+            const dd = Math.hypot(d.x - px(s.lon), d.y - py(s.lat));
+            if (dd < bd) { bd = dd; best = s; }
+          });
+          return { color: best ? colorOf(best.score) : "#cfd8de", wave: best ? bd * 8 : 0 };
+        });
+      }, [sources]);
+
+      return (
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img">
+          {DOTS.map((d, i) => (
+            <circle
+              key={i} cx={d.x} cy={d.y} className="flick"
+              r={mode === "idle" ? 2.6 : 2.8}
+              style={
+                mode === "scan" ? { fill: "#cfd8de", animation: `${d.k} ${d.dur}ms steps(1) ${d.del}ms infinite` }
+                : mode === "result" ? { fill: final[i]?.color || "#cfd8de", animation: `reveal 700ms ease-out ${final[i]?.wave || 0}ms backwards` }
+                : { fill: "#cfd8de" }
+              }
+            />
+          ))}
+          {pulses.map((p) => (
+            <circle key={p.id} cx={p.x} cy={p.y} r="4" fill="none" stroke={p.color} strokeWidth="2" className="ripple" />
+          ))}
+        </svg>
+      );
+    });
+
+    // ---------- Pure SVG Radar Chart Component ----------
+    function SvgRadarChart({ data = [] }) {
+      const size = 300;
+      const center = size / 2;
+      const radius = size * 0.38;
+      const count = data.length || 6;
+
+      const getCoord = (value, idx, rScale = 1.0) => {
+        const angle = (Math.PI * 2 / count) * idx - Math.PI / 2;
+        const r = (value / 100) * radius * rScale;
+        return {
+          x: center + r * Math.cos(angle),
+          y: center + r * Math.sin(angle)
+        };
+      };
+
+      const beforePoints = data.map((d, i) => {
+        const c = getCoord(d.Before, i);
+        return `${c.x},${c.y}`;
+      }).join(" ");
+
+      const nowPoints = data.map((d, i) => {
+        const c = getCoord(d.Now, i);
+        return `${c.x},${c.y}`;
+      }).join(" ");
+
+      return (
+        <svg viewBox={`0 0 ${size} ${size}`} className="w-full h-full">
+          {/* Polygons grid levels (20, 40, 60, 80, 100) */}
+          {[0.2, 0.4, 0.6, 0.8, 1.0].map((level, lIdx) => {
+            const gridPts = Array.from({ length: count }).map((_, i) => {
+              const c = getCoord(100, i, level);
+              return `${c.x},${c.y}`;
+            }).join(" ");
+            return (
+              <polygon key={lIdx} points={gridPts} fill="none" stroke="#cbd5e1" strokeWidth="1" strokeDasharray={level === 1.0 ? "none" : "3,3"} />
+            );
+          })}
+
+          {/* Spokes */}
+          {data.map((d, i) => {
+            const outer = getCoord(100, i, 1.0);
+            const labelCoord = getCoord(118, i, 1.0);
+            return (
+              <g key={i}>
+                <line x1={center} y1={center} x2={outer.x} y2={outer.y} stroke="#e2e8f0" strokeWidth="1" />
+                <text x={labelCoord.x} y={labelCoord.y + 4} textAnchor="middle" fontSize="11" fontWeight="600" fill="#334155">
+                  {d.dim}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Before polygon (dashed gray) */}
+          <polygon points={beforePoints} fill="#94a3b8" fillOpacity="0.15" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" />
+
+          {/* Now polygon (teal) */}
+          <polygon points={nowPoints} fill="#0f6b73" fillOpacity="0.35" stroke="#0f6b73" strokeWidth="2.5" />
+
+          {/* Points */}
+          {data.map((d, i) => {
+            const c = getCoord(d.Now, i);
+            return <circle key={i} cx={c.x} cy={c.y} r="3.5" fill="#0f6b73" />;
+          })}
+        </svg>
+      );
+    }
+
+    // ---------- Score Pill ----------
+    function ScorePill({ score }) {
+      const t = tone(score);
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ color: t.c, background: t.bg }}>
+          {score}
+          <span className="font-medium opacity-80">{t.label}</span>
+        </span>
+      );
+    }
+
+    // ---------- Main Application ----------
+    function App() {
+      const [view, setView] = useState("intake"); // "intake" | "results"
+      const [provider, setProvider] = useState("synthetic"); // "synthetic" | "gemini" | "amd_rocm"
+      const [apiKey, setApiKey] = useState("");
+      const [idea, setIdea] = useState("");
+      const [audience, setAudience] = useState("");
+      const [phase, setPhase] = useState("idle"); // "idle" | "running" | "done"
+      const [stepLabel, setStepLabel] = useState("");
+      const [activeSources, setActiveSources] = useState([]);
+      const [pulses, setPulses] = useState([]);
+      const [analysisResult, setAnalysisResult] = useState(null);
+      const [appliedFixes, setAppliedFixes] = useState(new Set());
+      const [openDimIdx, setOpenDimIdx] = useState(4);
+      const [activeTab, setActiveTab] = useState("overview"); // "overview" | "segments" | "questions"
+
+      const EXAMPLES = [
+        "A mobile app that connects students with local home cooks for affordable weekly meals",
+        "A subscription service that repairs and resells used school laptops",
+        "An AI study buddy that turns lecture recordings into practice quizzes",
+      ];
+
+      const DEFAULT_SOURCES_MAP = [
+        { name: "World Bank", region: "North America", lon: -77, lat: 39, score: 70 },
+        { name: "Eurostat", region: "Europe", lon: 6, lat: 50, score: 58 },
+        { name: "Failory post-mortems", region: "Europe", lon: 24, lat: 59, score: 35 },
+        { name: "African Development Bank", region: "Africa", lon: -4, lat: 5, score: 48 },
+        { name: "Asian Development Bank", region: "Asia", lon: 121, lat: 14, score: 74 },
+        { name: "IBGE (Brazil)", region: "South America", lon: -47, lat: -15, score: 52 },
+        { name: "Australian Bureau of Statistics", region: "Oceania", lon: 149, lat: -35, score: 66 },
+        { name: "Google Trends", region: "North America", lon: -122, lat: 37, score: 81 },
+      ];
+
+      const activateSource = (idx) => {
+        const s = DEFAULT_SOURCES_MAP[idx];
+        if (!s) return;
+        setActiveSources((prev) => [...prev, s]);
+        setPulses((p) => [...p, { id: `${idx}-${Date.now()}`, x: px(s.lon), y: py(s.lat), color: "#0f6b73" }]);
+      };
+
+      const startAnalysis = async (e) => {
+        e?.preventDefault();
+        if (!idea.trim() || phase === "running") return;
+
+        setPhase("running");
+        setActiveSources([]);
+        setPulses([]);
+        setStepLabel("Connecting to Python AI backend…");
+
+        // Simulate or stream UI step pulses while backend executes
+        const pulseTimers = [
+          setTimeout(() => { setStepLabel("Reading idea & formatting psychometric prompts"); }, 400),
+          setTimeout(() => { setStepLabel("Dispatching synthetic consumer panel (Twin-2K-500)"); activateSource(0); }, 1200),
+          setTimeout(() => { setStepLabel("Gemini Teacher formulating survey questions"); activateSource(1); }, 2200),
+          setTimeout(() => { setStepLabel("Evaluating pricing elasticity & objections"); activateSource(2); }, 3200),
+          setTimeout(() => { setStepLabel("Mapping competitor landscape"); activateSource(7); }, 4200),
+          setTimeout(() => { setStepLabel("Evaluating regulatory & workflow risks"); activateSource(3); }, 5200),
+          setTimeout(() => { setStepLabel("Testing unit economics against open data"); activateSource(4); }, 6200),
+        ];
+
+        try {
+          const res = await fetch("/api/evaluate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              idea: idea.trim(),
+              target_audience: audience.trim() || undefined,
+              provider: provider,
+              api_key: apiKey.trim() || undefined,
+            }),
+          });
+
+          if (!res.ok) {
+            throw new Error(`Server responded with ${res.status}`);
+          }
+
+          const data = await res.json();
+          pulseTimers.forEach(clearTimeout);
+
+          // Complete animation
+          setStepLabel("Analysis complete! Ready to view results.");
+          activateSource(5);
+          activateSource(6);
+          setAnalysisResult(data);
+          setPhase("done");
+        } catch (err) {
+          pulseTimers.forEach(clearTimeout);
+          setStepLabel(`Error: ${err.message}. Retrying with offline synthetic engine…`);
+          setTimeout(async () => {
+            const fallbackRes = await fetch("/api/evaluate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idea: idea.trim(), provider: "synthetic" }),
+            });
+            const fallbackData = await fallbackRes.json();
+            setAnalysisResult(fallbackData);
+            setPhase("done");
+            setStepLabel("Analysis complete (via Synthetic Engine).");
+          }, 1000);
+        }
+      };
+
+      const resetAll = () => {
+        setPhase("idle");
+        setStepLabel("");
+        setActiveSources([]);
+        setPulses([]);
+        setAnalysisResult(null);
+        setAppliedFixes(new Set());
+        setView("intake");
+      };
+
+      const toggleFix = (text) => {
+        setAppliedFixes((prev) => {
+          const next = new Set(prev);
+          next.has(text) ? next.delete(text) : next.add(text);
+          return next;
+        });
+      };
+
+      // Calculate dynamic score updates when fixes are toggled
+      const currentDimensions = useMemo(() => {
+        if (!analysisResult) return [];
+        return analysisResult.dimensions.map((d) => {
+          const addedGain = d.fixes
+            .filter((f) => appliedFixes.has(f.text))
+            .reduce((sum, f) => sum + f.gain, 0);
+          return {
+            ...d,
+            now: clamp(d.score + addedGain),
+          };
+        });
+      }, [analysisResult, appliedFixes]);
+
+      const baseScore = analysisResult?.overall_score || 60;
+      const currentAvg = useMemo(() => {
+        if (currentDimensions.length === 0) return baseScore;
+        const avg = Math.round(currentDimensions.reduce((a, b) => a + b.now, 0) / currentDimensions.length);
+        return clamp(avg);
+      }, [currentDimensions, baseScore]);
+
+      const chartData = useMemo(() => {
+        return currentDimensions.map((d) => ({
+          dim: d.name,
+          Before: d.score,
+          Now: d.now,
+        }));
+      }, [currentDimensions]);
+
+      const weakest = useMemo(() => {
+        return [...currentDimensions].sort((a, b) => a.now - b.now).slice(0, 3);
+      }, [currentDimensions]);
+
+      return (
+        <div className="min-h-screen px-4 py-8 max-w-6xl mx-auto space-y-6">
+          {/* Top Bar: Brand, Hardware Tag & Engine Selector */}
+          <nav className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-teal-800 flex items-center justify-center text-white font-black text-xl shadow-sm">
+                V
+              </div>
+              <div>
+                <h1 className="text-xl font-extrabold tracking-tight text-slate-900">VibeCheck AI</h1>
+                <p className="text-xs text-slate-500 font-medium">
+                  AMD Instinct™ ROCm Panel &middot; Gemini Teacher &middot; Twin-2K-500
+                </p>
+              </div>
+            </div>
+
+            {/* Model Engine Selector */}
+            <div className="flex items-center gap-2 bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm text-xs font-semibold">
+              <span className="text-slate-400 px-2 font-normal">Inference Engine:</span>
+              <button
+                type="button"
+                onClick={() => setProvider("synthetic")}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  provider === "synthetic"
+                    ? "bg-teal-800 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                ⚡ Synthetic (Offline)
+              </button>
+              <button
+                type="button"
+                onClick={() => setProvider("gemini")}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  provider === "gemini"
+                    ? "bg-teal-800 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                🧠 Gemini Teacher
+              </button>
+              <button
+                type="button"
+                onClick={() => setProvider("amd_rocm")}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 ${
+                  provider === "amd_rocm"
+                    ? "bg-red-800 text-white shadow-sm"
+                    : "text-red-700 hover:bg-red-50"
+                }`}
+              >
+                <span>🚀 AMD ROCm (MI300X)</span>
+              </button>
+            </div>
+          </nav>
+
+          {/* Optional Gemini API key drawer if gemini is active */}
+          {provider === "gemini" && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-900">
+              <div className="flex items-center gap-2">
+                <span className="font-bold">Gemini Mode:</span>
+                <span>Uses Google Generative AI to act as teacher & baseline.</span>
+              </div>
+              <input
+                type="password"
+                placeholder="Optional GEMINI_API_KEY (or set via .env)"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="bg-white border border-amber-300 rounded-md px-3 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-teal-700 w-64"
+              />
+            </div>
+          )}
+
+          {/* VIEW 1: IDEA INTAKE & SIMULATION GAUGE */}
+          {view === "intake" && (
+            <div className="space-y-6">
+              <header className="text-center pt-2">
+                <h2 className="text-3xl font-extrabold tracking-tight md:text-4xl text-slate-900">
+                  What's your business idea?
+                </h2>
+                <p className="mt-2 text-slate-600 max-w-2xl mx-auto text-sm md:text-base">
+                  Describe your concept and target audience. Our synthetic consumer panel (fine-tuned on AMD Instinct GPUs) and Gemini Teacher will stress-test it in seconds.
+                </p>
+              </header>
+
+              {/* Input Form */}
+              <form onSubmit={startAnalysis} className="mx-auto max-w-3xl space-y-3">
+                <div className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-teal-700">
+                  <textarea
+                    id="idea-input"
+                    rows={3}
+                    value={idea}
+                    disabled={phase === "running"}
+                    onChange={(e) => setIdea(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) startAnalysis(e); }}
+                    placeholder="Example: A mobile app that connects students with local home cooks for affordable weekly meals..."
+                    className="w-full resize-none bg-transparent p-1 text-base outline-none disabled:text-slate-500"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                    <input
+                      type="text"
+                      placeholder="Target audience (e.g. college students, urban professionals)"
+                      value={audience}
+                      disabled={phase === "running"}
+                      onChange={(e) => setAudience(e.target.value)}
+                      className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:border-teal-700 flex-1 max-w-md"
+                    />
+                    <div className="flex gap-2">
+                      {phase === "idle" && (
+                        <button
+                          type="submit"
+                          disabled={!idea.trim()}
+                          className="rounded-lg bg-teal-800 px-5 py-2 font-semibold text-white hover:bg-teal-900 disabled:bg-slate-300 transition-all text-sm shadow-sm"
+                        >
+                          Analyze Idea
+                        </button>
+                      )}
+                      {phase === "running" && (
+                        <button
+                          type="button"
+                          onClick={resetAll}
+                          className="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50 text-sm"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {phase === "idle" && (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {EXAMPLES.map((ex) => (
+                      <button
+                        key={ex}
+                        type="button"
+                        onClick={() => setIdea(ex)}
+                        className="rounded-full bg-white px-3 py-1.5 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-teal-700 transition-all"
+                      >
+                        {ex.length > 50 ? ex.slice(0, 50) + "…" : ex}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </form>
+
+              {/* Speedometer Gauge + Map Panel */}
+              <section className="grid gap-6 rounded-xl bg-white p-6 shadow-sm border border-slate-200 md:grid-cols-5">
+                <div className="flex flex-col items-center md:col-span-2 justify-between">
+                  <Gauge
+                    mode={phase === "running" ? "scan" : phase === "done" ? "result" : "idle"}
+                    score={analysisResult?.overall_score ?? 65}
+                  />
+                  <p className="mt-2 min-h-[2.5rem] text-center font-semibold text-slate-800 text-sm" aria-live="polite">
+                    {phase === "done"
+                      ? `${tone(analysisResult?.overall_score || 65).label}: Scores ${analysisResult?.overall_score} / 100`
+                      : stepLabel || "Waiting for your business idea"}
+                  </p>
+
+                  {phase === "done" && (
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => setView("results")}
+                        className="rounded-lg bg-teal-800 px-6 py-2.5 font-semibold text-white hover:bg-teal-900 transition-all text-sm shadow-md"
+                      >
+                        View Full Assessment &rarr;
+                      </button>
+                      <button
+                        onClick={resetAll}
+                        className="rounded-lg border border-slate-300 px-4 py-2.5 font-semibold text-slate-700 hover:bg-slate-50 text-sm"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
+
+                  <ul className="mt-5 w-full space-y-1.5 text-xs border-t border-slate-100 pt-3">
+                    {activeSources.length === 0 && (
+                      <li className="text-slate-400 italic">Data sources and consumer panels will respond here in real-time.</li>
+                    )}
+                    {activeSources.map((s, i) => (
+                      <li key={i} className="flex items-center gap-2">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: colorOf(s.score) }} />
+                        <span className="font-medium text-slate-800">{s.name}</span>
+                        <span className="text-slate-400">({s.region})</span>
+                        <span className="ml-auto font-bold" style={{ color: colorOf(s.score) }}>
+                          {phase === "done" ? s.score : "ok"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="md:col-span-3 flex flex-col justify-between">
+                  <DotMap
+                    mode={phase === "running" ? "scan" : phase === "done" ? "result" : "idle"}
+                    pulses={pulses}
+                    sources={analysisResult?.sources || DEFAULT_SOURCES_MAP}
+                  />
+                  <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <span className="font-semibold text-slate-700">Open Data Regional Feedback:</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-600" /> Positive (&gt;66)</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" /> Mixed (33-66)</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> Negative (&lt;33)</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* VIEW 2: RESULTS DASHBOARD WITH SEGMENTS & RADAR */}
+          {view === "results" && analysisResult && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <button
+                    onClick={() => setView("intake")}
+                    className="text-xs text-teal-800 font-semibold hover:underline flex items-center gap-1 mb-1"
+                  >
+                    &larr; Back to Pitch Input
+                  </button>
+                  <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
+                    Idea Assessment & Decision Support
+                  </h2>
+                  <p className="text-xs md:text-sm text-slate-600 mt-1 max-w-3xl">
+                    "{analysisResult.idea}"
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={resetAll}
+                    className="rounded-lg bg-teal-800 px-4 py-2 font-semibold text-white hover:bg-teal-900 text-xs shadow-sm"
+                  >
+                    Analyze New Idea
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-50 text-xs shadow-sm"
+                  >
+                    Print / Save PDF
+                  </button>
+                </div>
+              </div>
+
+              {/* View Tabs */}
+              <div className="flex border-b border-slate-200 gap-6 text-sm font-semibold">
+                <button
+                  onClick={() => setActiveTab("overview")}
+                  className={`pb-2 transition-all border-b-2 ${
+                    activeTab === "overview"
+                      ? "border-teal-800 text-teal-900 font-bold"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  📊 Viability & 6 Dimensions
+                </button>
+                <button
+                  onClick={() => setActiveTab("segments")}
+                  className={`pb-2 transition-all border-b-2 flex items-center gap-1.5 ${
+                    activeTab === "segments"
+                      ? "border-teal-800 text-teal-900 font-bold"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <span>👥 AMD Synthetic Consumer Panel (Twin-2K-500)</span>
+                  <span className="bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded-full font-bold">ROCm</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab("questions")}
+                  className={`pb-2 transition-all border-b-2 ${
+                    activeTab === "questions"
+                      ? "border-teal-800 text-teal-900 font-bold"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  🎓 Gemini Teacher Questions & Competitors
+                </button>
+              </div>
+
+              {/* TAB 1: OVERVIEW & 6 DIMENSIONS */}
+              {activeTab === "overview" && (
+                <div className="space-y-6">
+                  {/* Hero Viability Score & Radar */}
+                  <section className="grid gap-6 rounded-xl bg-white p-6 shadow-sm border border-slate-200 md:grid-cols-5">
+                    <div className="flex flex-col justify-center md:col-span-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Overall Viability Score</p>
+                      <div className="flex items-baseline gap-2 mt-1">
+                        <span className="text-6xl font-black leading-none" style={{ color: tone(currentAvg).c }}>
+                          {currentAvg}
+                        </span>
+                        <span className="text-xl text-slate-400 font-bold">/ 100</span>
+                      </div>
+                      <p className="mt-1 text-sm font-bold" style={{ color: tone(currentAvg).c }}>
+                        {tone(currentAvg).label}
+                      </p>
+
+                      {currentAvg !== baseScore && (
+                        <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 border border-emerald-200">
+                          Score boosted by <strong>+{currentAvg - baseScore} points</strong> with applied fixes.
+                        </p>
+                      )}
+
+                      <div className="mt-5 border-t border-slate-100 pt-4">
+                        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Fix These First</p>
+                        <ol className="space-y-2 text-xs text-slate-700">
+                          {weakest.map((d) => (
+                            <li key={d.name} className="flex items-center justify-between gap-2 p-1.5 rounded-md bg-slate-50">
+                              <span className="font-medium truncate"><strong>{d.name}:</strong> {d.flaws[0] || "Review"}</span>
+                              <ScorePill score={d.now} />
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    </div>
+
+                    <div className="h-72 md:col-span-3 flex items-center justify-center p-2">
+                      <SvgRadarChart data={chartData} />
+                    </div>
+                  </section>
+
+                  {/* Dimension Cards */}
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-bold text-slate-900">Six Core Business Dimensions</h3>
+                      <span className="text-xs text-slate-500">Click a card to review flaws & apply point-gain fixes</span>
+                    </div>
+
+                    {currentDimensions.map((dim, idx) => {
+                      const t = tone(dim.now);
+                      const gained = dim.now - dim.score;
+                      const isOpen = openDimIdx === idx;
+
+                      return (
+                        <div
+                          key={dim.name}
+                          className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden transition-all"
+                          style={{ borderLeft: `6px solid ${t.c}` }}
+                        >
+                          <button
+                            onClick={() => setOpenDimIdx(isOpen ? -1 : idx)}
+                            className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-slate-50/60 transition-colors"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-base font-bold text-slate-900">{dim.name}</h4>
+                                {gained > 0 && (
+                                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                                    +{gained} gain
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-0.5 text-xs text-slate-600">{dim.summary}</p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <ScorePill score={dim.now} />
+                              <span className="text-slate-400 text-lg font-bold w-5 text-center">{isOpen ? "−" : "+"}</span>
+                            </div>
+                          </button>
+
+                          {isOpen && (
+                            <div className="grid gap-5 border-t border-slate-100 p-4 md:grid-cols-2 bg-slate-50/40">
+                              {/* Flaws */}
+                              <div>
+                                <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-red-800">
+                                  Identified Flaws & Friction
+                                </h5>
+                                <ul className="space-y-2 text-xs text-slate-700">
+                                  {dim.flaws.map((flaw, fIdx) => (
+                                    <li key={fIdx} className="flex items-start gap-2">
+                                      <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-red-600" />
+                                      <span>{flaw}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                                {dim.sources && dim.sources.length > 0 && (
+                                  <div className="mt-4 pt-3 border-t border-slate-200">
+                                    <h5 className="mb-1 text-xs font-semibold text-slate-600">Research & Evidence:</h5>
+                                    {dim.sources.map((src, sIdx) => (
+                                      <a
+                                        key={sIdx}
+                                        href={src.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs text-teal-800 underline block hover:text-teal-950"
+                                      >
+                                        &bull; {src.title}
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Fixes with Interactive Gain Button */}
+                              <div>
+                                <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-800">
+                                  Actionable Improvement Fixes
+                                </h5>
+                                <ul className="space-y-2">
+                                  {dim.fixes.map((fix) => {
+                                    const isApplied = appliedFixes.has(fix.text);
+                                    return (
+                                      <li
+                                        key={fix.text}
+                                        className="flex items-start justify-between gap-3 rounded-lg bg-white p-3 text-xs text-slate-800 border border-slate-200 shadow-sm"
+                                      >
+                                        <span className="font-medium">{fix.text}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleFix(fix.text)}
+                                          className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
+                                            isApplied
+                                              ? "bg-teal-800 text-white"
+                                              : "border border-teal-800 text-teal-800 hover:bg-teal-50"
+                                          }`}
+                                        >
+                                          {isApplied ? `Applied (+${fix.gain})` : `Apply (+${fix.gain})`}
+                                        </button>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </section>
+
+                  {/* Alternative Directions */}
+                  {analysisResult.alternative_ideas && (
+                    <section className="rounded-xl bg-white p-5 shadow-sm border border-slate-200">
+                      <h3 className="text-base font-bold text-slate-900 mb-3">Other Directions Worth Testing</h3>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {analysisResult.alternative_ideas.map((alt, i) => (
+                          <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
+                            &bull; {alt}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: AMD SYNTHETIC CONSUMER PANEL (TWIN-2K-500) */}
+              {activeTab === "segments" && (
+                <div className="space-y-6">
+                  <div className="bg-gradient-to-r from-red-900 to-slate-900 rounded-xl p-5 text-white shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-red-300">
+                        AMD Instinct MI300X &middot; ROCm Fine-Tuned Consumer Panel
+                      </span>
+                      <span className="text-xs bg-red-800/80 px-2 py-0.5 rounded text-white font-mono">
+                        Twin-2K-500 Dataset
+                      </span>
+                    </div>
+                    <h3 className="text-xl font-black mt-1">Simulated Customer Segments & Pricing Elasticity</h3>
+                    <p className="text-xs text-slate-200 mt-1 max-w-2xl">
+                      Trained on real survey answers from 2,058 US respondents across demographic profiles, reflecting how actual consumers respond with realistic uncertainty ranges.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {analysisResult.customer_segments?.map((seg, sIdx) => {
+                      const isPos = seg.sentiment === "Positive";
+                      const isNeg = seg.sentiment === "Negative";
+
+                      return (
+                        <div key={sIdx} className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h4 className="font-bold text-slate-900 text-sm">{seg.segment_name}</h4>
+                              <p className="text-[11px] text-slate-500 font-mono mt-0.5">{seg.demographic_profile}</p>
+                            </div>
+                            <span
+                              className={`text-xs px-2.5 py-0.5 rounded-full font-bold ${
+                                isPos ? "bg-emerald-100 text-emerald-800" : isNeg ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"
+                              }`}
+                            >
+                              {seg.sentiment} ({seg.sentiment_score}/100)
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                            {seg.reaction_summary}
+                          </p>
+
+                          <div className="bg-teal-50/70 border border-teal-200 rounded-lg p-2.5">
+                            <span className="text-[10px] font-bold uppercase text-teal-800 tracking-wider block">
+                              Willingness-to-Pay (with Uncertainty Range):
+                            </span>
+                            <span className="text-sm font-extrabold text-teal-950 font-mono">
+                              {seg.willingness_to_pay}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-700 block mb-1">Top Segment Objections:</span>
+                            <ul className="space-y-1 text-xs text-slate-600">
+                              {seg.objections?.map((obj, oIdx) => (
+                                <li key={oIdx} className="flex items-start gap-1.5">
+                                  <span className="text-red-500 font-bold">&times;</span>
+                                  <span>{obj}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: GEMINI TEACHER QUESTIONS & COMPETITORS */}
+              {activeTab === "questions" && (
+                <div className="space-y-6">
+                  {/* Gemini Teacher Questions */}
+                  <section className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900">
+                          Gemini Teacher Survey Questions
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Automated survey synthesis turning the pitch into psychometric instruments (Pricing elasticity, adoption friction, usage velocity)
+                        </p>
+                      </div>
+                      <span className="text-xs bg-teal-100 text-teal-800 px-2.5 py-1 rounded-full font-semibold">
+                        Teacher Baseline
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 pt-2">
+                      {analysisResult.survey_questions?.map((q, qIdx) => (
+                        <div key={qIdx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                              {q.id} &middot; {q.category}
+                            </span>
+                            <span className="text-[11px] text-slate-500 italic">{q.intent}</span>
+                          </div>
+                          <p className="text-xs font-semibold text-slate-800">{q.question}</p>
+                          <div className="grid grid-cols-2 gap-1.5 text-xs text-slate-600 pt-1">
+                            {q.options?.map((opt, oIdx) => (
+                              <div key={oIdx} className="bg-white px-2 py-1 rounded border border-slate-200">
+                                {opt}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Competitor Mapping */}
+                  <section className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm space-y-3">
+                    <h3 className="text-base font-bold text-slate-900">Competitor Mapping Matrix</h3>
+                    <p className="text-xs text-slate-500">
+                      Discovery of existing alternatives and structural vulnerabilities to exploit.
+                    </p>
+                    <div className="grid gap-3 md:grid-cols-3 pt-2">
+                      {analysisResult.competitors?.map((comp, cIdx) => (
+                        <div key={cIdx} className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-bold text-slate-900">{comp.name}</h4>
+                            <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono">
+                              {comp.market_role}
+                            </span>
+                          </div>
+                          <p className="text-slate-600"><strong>Advantage:</strong> {comp.differentiation}</p>
+                          <p className="text-red-700 font-medium"><strong>Vulnerability:</strong> {comp.vulnerability}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {/* Metadata Footer */}
+              <footer className="text-xs text-slate-400 border-t border-slate-200 pt-4 flex flex-wrap justify-between items-center gap-2">
+                <div>
+                  Engine: <strong>{analysisResult.inference_metadata?.engine || "Synthetic"}</strong> &middot;
+                  Latency: <strong>{analysisResult.inference_metadata?.latency_ms || 240}ms</strong> &middot;
+                  Hardware: <strong>{analysisResult.inference_metadata?.hardware || "AMD Instinct Ready"}</strong>
+                </div>
+                <div>Decision support tool for AMD Hackathon Act III. Not legal or financial advice.</div>
+              </footer>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
