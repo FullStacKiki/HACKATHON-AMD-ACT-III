@@ -43,6 +43,11 @@ eval_pricing.jsonl, eval_megastudy.jsonl, eval_globalopinionqa.jsonl,
 tabular.csv (same rows as the Twin files, for a CatBoost baseline), DATA.md.
 Plus a 100-row train sample (--sample-out, default samples/train_sample.jsonl).
 
+--v2 builds version 2 in <data-dir>/processed_v2: the same Twin-2K-500 rows plus
+single-answer economic and policy questions from the GSS (waves 2016+) and the
+ANES 2024 Time Series, with the reduced profile (ANES: + state). See
+V2_QUESTIONS and v2_records. Without --v2 the output is the same as version 1.
+
 Usage:
   python -I scripts/build_dataset.py --data-dir /path/to/survey-data
 Requires pandas and pyarrow.
@@ -419,6 +424,453 @@ def goqa_records(goqa_dir, stats):
     return recs
 
 
+# ------------------------------------------------- v2: GSS 2016+ and ANES 2024
+
+# Reduced Twin profile with Twin's own categories (QID13, QID12, QID14, QID21, QID11)
+AGE_CATS = ["18-29", "30-49", "50-64", "65+"]
+SEX_CATS = ["Male", "Female"]
+EDU_CATS = ["Less than high school", "High school graduate", "Some college, no degree",
+            "Associate's degree", "College graduate/some postgrad", "Postgraduate"]
+INC_CATS = ["Less than $30,000", "$30,000-$50,000", "$50,000-$75,000", "$75,000-$100,000",
+            "$100,000 or more"]
+REGION_CATS = ["Northeast", "Midwest", "South", "West"]
+US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
+    "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "DC": "District of Columbia",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana",
+    "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri",
+    "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey",
+    "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
+    "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
+    "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+GSS_ZIP, GSS_DTA = "GSS/GSS_stata.zip", "GSS_stata/gss7224_r3a.dta"
+ANES_ZIP, ANES_CSV = "ANES/anes_timeseries_2024_csv_20260519.zip", "anes_timeseries_2024_csv_20260519.csv"
+GSS_FROM_YEAR = 2016
+
+# Question text from the GSS 2024 codebook (Release 3a) and, where its label is cut at 255
+# characters, from the GSS 1972-2024 cumulative codebook on SDA Berkeley; ANES text from the
+# 2024 Time Series codebook (forward response order). Interviewer instructions are dropped.
+# Options are the value labels of codes 1..n; any other code (e.g. ANES "Other {SPECIFY}") is dropped.
+NAT_Q = ("We are faced with many problems in this country, none of which can be solved easily or "
+         "inexpensively. Are we spending too much money, too little money, or about the right amount on: {}?")
+NAT_OPTS = ["Too little", "About right", "Too much"]
+CONF_Q = ("I am going to name some institutions in this country. As far as the people running these "
+          "institutions are concerned, would you say you have a great deal of confidence, only some "
+          "confidence, or hardly any confidence at all in them? Institution: \"{}\"")
+CONF_OPTS = ["A great deal", "Only some", "Hardly any"]
+IMM_Q = ("There are different opinions about immigrants from other countries living in America. (By "
+         "\"immigrants\" we mean people who come to settle in America.) How much do you agree or disagree "
+         "with the following statement? Statement: \"{}\"")
+AGREE5 = ["Agree strongly", "Agree", "Neither agree nor disagree", "Disagree", "Disagree strongly"]
+HELP_SCALE = ("{} Where would you place yourself on a scale from 1 to 5?")
+ANES_SPEND_Q = "Should federal spending on {} be increased, decreased, or kept the same?"
+ANES_SPEND_OPTS = ["Increased", "Decreased", "Kept the same"]
+FAVOR3 = ["Favor", "Oppose", "Neither favor nor oppose"]
+
+# (source, variable, topic, family, question, options). Questions in the same family (between-
+# subject variants, or the same attitude asked by both surveys) always land in the same split.
+V2_QUESTIONS = [
+    # ---- GSS: economy
+    ("GSS", "satfin", "economy", None,
+     "We are interested in how people are getting along financially these days. So far as you and your "
+     "family are concerned, would you say that you are pretty well satisfied with your present financial "
+     "situation, more or less satisfied, or not satisfied at all?",
+     ["Pretty well satisfied", "More or less satisfied", "Not satisfied at all"]),
+    ("GSS", "finalter", "economy", "fin_change",
+     "During the last few years, has your financial situation been getting better, worse, or has it "
+     "stayed the same?", ["Better", "Worse", "Stayed the same"]),
+    ("GSS", "finrela", "economy", None,
+     "Compared with American families in general, would you say your family income is far below average, "
+     "below average, average, above average, or far above average?",
+     ["Far below average", "Below average", "Average", "Above average", "Far above average"]),
+    ("GSS", "joblose", "economy", None,
+     "Thinking about the next 12 months, how likely do you think it is that you will lose your job or be "
+     "laid off--very likely, fairly likely, not too likely, or not at all likely?",
+     ["Very likely", "Fairly likely", "Not too likely", "Not at all likely"]),
+    ("GSS", "jobfind", "economy", None,
+     "About how easy would it be for you to find a job with another employer with approximately the same "
+     "income and fringe benefits you now have? Would you say very easy, somewhat easy, or not easy at all?",
+     ["Very easy", "Somewhat easy", "Not easy at all"]),
+    ("GSS", "confinan", "economy", None, CONF_Q.format("Banks and financial institutions"), CONF_OPTS),
+    ("GSS", "getahead", "economy", None,
+     "Some people say that people get ahead by their own hard work; others say that lucky breaks or help "
+     "from other people are more important. Which do you think is most important?",
+     ["Hard work most important", "Hard work, luck equally important", "Luck most important"]),
+    ("GSS", "imports", "economy", "trade",
+     "How much do you agree or disagree with the following statement? Statement: \"America should limit "
+     "the import of foreign products in order to protect its national economy.\"", AGREE5),
+    ("GSS", "econstat", "economy", None,
+     "What do you think about the state of the economy these days in the United States?",
+     ["Very good", "Good", "Neither good nor bad", "Bad", "Very bad"]),
+    ("GSS", "aiworry", "economy", None,
+     "Overall, how worried, if at all, are you that in the next 10 years machines, computer programs, and "
+     "Artificial Intelligence (AI) will take over many of the jobs done by humans?",
+     ["Very worried", "Somewhat worried", "Neither worried nor unworried", "Not very worried",
+      "Not at all worried"]),
+    ("GSS", "bizmoney", "economy", None,
+     "To what extent do you agree or disagree with the following statement? Statement: \"Business leaders "
+     "make their money at the expense of ordinary people.\"",
+     ["Strongly agree", "Agree", "Neither agree nor disagree", "Disagree", "Strongly disagree"]),
+    # ---- GSS: taxes, redistribution and public spending
+    ("GSS", "tax", "taxes", None,
+     "Do you consider the amount of federal income tax which you have to pay as too high, about right, or "
+     "too low?", ["Too high", "About right", "Too low"]),
+    ("GSS", "eqwlth", "taxes", "income_gap",
+     "Some people think that the government in Washington ought to reduce the income differences between "
+     "the rich and the poor, perhaps by raising the taxes of wealthy families or by giving income "
+     "assistance to the poor. Others think that the government should not concern itself with reducing "
+     "this income difference between the rich and the poor. Think of a score of 1 as meaning that the "
+     "government ought to reduce the income differences between rich and poor, and a score of 7 meaning "
+     "that the government should not concern itself with reducing income differences. What score between "
+     "1 and 7 comes closest to the way you feel?",
+     ["1 (the government should reduce income differences)", "2", "3", "4", "5", "6",
+      "7 (the government should not concern itself with reducing income differences)"]),
+    ("GSS", "incgap1", "taxes", "income_gap",
+     "Thinking about the situation in America, to what extent do you agree or disagree with the following "
+     "statement? Statement: \"It should be the government's responsibility to reduce income differences "
+     "between the rich and the poor.\"",
+     ["Strongly agree", "Agree", "Neither agree nor disagree", "Disagree", "Strongly disagree"]),
+    ("GSS", "helppoor", "taxes", None, HELP_SCALE.format(
+        "Some people think that the government in Washington should do everything possible to improve the "
+        "standard of living of all poor Americans; they are at point 1. Other people think it is not the "
+        "government's responsibility, and that each person should take care of himself; they are at point 5."),
+     ["1 (government should help)", "2", "3 (agree with both)", "4",
+      "5 (people should take care of themselves)"]),
+    ("GSS", "helpnot", "taxes", "gov_size", HELP_SCALE.format(
+        "Some people think that the government in Washington is trying to do too many things that should be "
+        "left to individuals and private businesses; they are at point 5. Others disagree and think that the "
+        "government should do even more to solve our country's problems; they are at point 1. Still others "
+        "have opinions somewhere in between."),
+     ["1 (government should do more)", "2", "3 (agree with both)", "4", "5 (government does too much)"]),
+    ("GSS", "natsoc", "taxes", "spend_socsec", NAT_Q.format("Social Security"), NAT_OPTS),
+    ("GSS", "natfare", "taxes", "spend_welfare", NAT_Q.format("Welfare"), NAT_OPTS),
+    ("GSS", "natfarey", "taxes", "spend_welfare", NAT_Q.format("Assistance to the poor"), NAT_OPTS),
+    ("GSS", "natchld", "taxes", None, NAT_Q.format("Assistance for childcare"), NAT_OPTS),
+    ("GSS", "natenrgy", "taxes", None, NAT_Q.format("Developing alternative energy sources"), NAT_OPTS),
+    ("GSS", "natroad", "taxes", "spend_roads", NAT_Q.format("Highways and bridges"), NAT_OPTS),
+    ("GSS", "natarms", "taxes", "spend_defense", NAT_Q.format("The military, armaments, and defense"), NAT_OPTS),
+    ("GSS", "natarmsy", "taxes", "spend_defense", NAT_Q.format("National defense"), NAT_OPTS),
+    ("GSS", "nataid", "taxes", "spend_foreign", NAT_Q.format("Foreign aid"), NAT_OPTS),
+    ("GSS", "nataidy", "taxes", "spend_foreign", NAT_Q.format("Assistance to other countries"), NAT_OPTS),
+    ("GSS", "natsci", "taxes", None, NAT_Q.format("Supporting scientific research"), NAT_OPTS),
+    ("GSS", "natenvir", "taxes", "spend_env", NAT_Q.format("Improving and protecting the environment"), NAT_OPTS),
+    ("GSS", "natenviy", "taxes", "spend_env", NAT_Q.format("The environment"), NAT_OPTS),
+    # ---- GSS: health
+    ("GSS", "natheal", "health", "spend_health",
+     NAT_Q.format("Improving and protecting the nation's health"), NAT_OPTS),
+    ("GSS", "nathealy", "health", "spend_health", NAT_Q.format("Health"), NAT_OPTS),
+    ("GSS", "helpsick", "health", None, HELP_SCALE.format(
+        "In general, some people think that it is the responsibility of the government in Washington to see "
+        "to it that people have help in paying for doctors and hospital bills; they are at point 1. Others "
+        "think that these matters are not the responsibility of the federal government and that people "
+        "should take care of these things themselves; they are at point 5."),
+     ["1 (government should help)", "2", "3 (agree with both)", "4",
+      "5 (people should take care of themselves)"]),
+    # ---- GSS: immigration
+    ("GSS", "letin1a", "immigration", "immig_level",
+     "Do you think the number of immigrants to America nowadays should be increased a lot, increased a "
+     "little, remain the same as it is, reduced a little, or reduced a lot?",
+     ["Increased a lot", "Increased a little", "Remain the same as it is", "Reduced a little",
+      "Reduced a lot"]),
+    ("GSS", "immfate", "immigration", "unauthorized",
+     "What should be done about immigrants who are currently living in the U.S. illegally?",
+     ["Become citizens", "Become permanent legal residents", "Identified and deported"]),
+    ("GSS", "immjobs", "immigration", None,
+     IMM_Q.format("Immigrants take jobs away from people who were born in America."), AGREE5),
+    ("GSS", "immcrime", "immigration", None, IMM_Q.format("Immigrants increase crime rates."), AGREE5),
+    ("GSS", "immameco", "immigration", "immig_econ",
+     IMM_Q.format("Immigrants are generally good for America's economy."), AGREE5),
+    # ---- GSS: other policies
+    ("GSS", "confed", "policy", None, CONF_Q.format("Executive branch of the federal government"), CONF_OPTS),
+    ("GSS", "gunlaw", "policy", None,
+     "Would you favor or oppose a law which would require a person to obtain a police permit before he or "
+     "she could buy a gun?", ["Favor", "Oppose"]),
+    ("GSS", "cappun", "policy", None,
+     "Do you favor or oppose the death penalty for persons convicted of murder?", ["Favor", "Oppose"]),
+    ("GSS", "abany", "policy", "abortion",
+     "Please tell me whether or not you think it should be possible for a pregnant woman to obtain a legal "
+     "abortion if the woman wants it for any reason.", ["Yes", "No"]),
+
+    # ---- ANES: economy
+    ("ANES", "V241291", "economy", None,
+     "Now thinking about the economy in the country as a whole, would you say that over the past year the "
+     "nation's economy has gotten better, stayed about the same, or gotten worse?",
+     ["Gotten better", "Stayed about the same", "Gotten worse"]),
+    ("ANES", "V241295", "economy", None,
+     "What about the next 12 months? Do you expect the economy, in the country as a whole, to get better, "
+     "stay about the same, or get worse?", ["Get better", "Stay about the same", "Get worse"]),
+    ("ANES", "V241451", "economy", "fin_change",
+     "We are interested in how people are getting along financially these days. Would you say that you "
+     "(and your family living here) are much better off financially, somewhat better off, about the same, "
+     "somewhat worse off, or much worse off than you were a year ago?",
+     ["Much better off", "Somewhat better off", "About the same", "Somewhat worse off", "Much worse off"]),
+    ("ANES", "V241236", "economy", None,
+     "Which party do you think would do a better job of handling the nation's economy?",
+     ["Democrats would do a much better job", "Democrats would do a somewhat better job",
+      "Not much difference between them", "Republicans would do a somewhat better job",
+      "Republicans would do a much better job"]),
+    ("ANES", "V241141", "economy", None,
+     "Do you approve or disapprove of the way Joe Biden is handling the economy?", ["Approve", "Disapprove"]),
+    ("ANES", "V242183", "economy", None,
+     "Please tell us which political party, the Democrats or the Republicans, would do a better job "
+     "handling the following issue, or is there no difference. Issue: \"The cost of living and rising "
+     "prices\"", ["Democrats", "Republicans", "No difference"]),
+    ("ANES", "V242344", "economy", "trade",
+     "Do you favor, oppose, or neither favor nor oppose the U.S. making free trade agreements with other "
+     "countries?", FAVOR3),
+    # ---- ANES: taxes, redistribution and public spending
+    ("ANES", "V242316a", "taxes", None,
+     "Do you favor, oppose, or neither favor nor oppose increasing income taxes on people making over one "
+     "million dollars per year?", FAVOR3),
+    ("ANES", "V242350", "taxes", None,
+     "Should the federal minimum wage be raised, kept the same, lowered but not eliminated, or eliminated "
+     "altogether?", ["Raised", "Kept the same", "Lowered", "Eliminated"]),
+    ("ANES", "V242250", "taxes", "income_gap",
+     "Do you favor, oppose, or neither favor nor oppose the government trying to reduce the difference in "
+     "incomes between the richest and poorest households?", FAVOR3),
+    ("ANES", "V242249", "taxes", None,
+     "Would it be good for society to have more government regulation, about the same amount of "
+     "regulation as there is now, or less government regulation?",
+     ["Much more", "Somewhat more", "A little more", "About the same amount", "A little less",
+      "Somewhat less", "Much less"]),
+    ("ANES", "V242246", "taxes", "gov_size",
+     "Which of the following statements comes closer to your view? One, the less government, the better; "
+     "or Two, there are more things that government should be doing.",
+     ["The less government the better", "More things government should be doing"]),
+    ("ANES", "V241261", "taxes", "spend_socsec", ANES_SPEND_Q.format("Social Security"), ANES_SPEND_OPTS),
+    ("ANES", "V241264", "taxes", None, ANES_SPEND_Q.format("public schools"), ANES_SPEND_OPTS),
+    ("ANES", "V241270", "taxes", None, ANES_SPEND_Q.format("dealing with crime"), ANES_SPEND_OPTS),
+    ("ANES", "V241273", "taxes", "spend_welfare", ANES_SPEND_Q.format("welfare programs"), ANES_SPEND_OPTS),
+    ("ANES", "V241276", "taxes", "spend_roads",
+     ANES_SPEND_Q.format("building and repairing highways"), ANES_SPEND_OPTS),
+    ("ANES", "V241279", "taxes", "spend_welfare", ANES_SPEND_Q.format("aid to the poor"), ANES_SPEND_OPTS),
+    ("ANES", "V241282", "taxes", "spend_env",
+     ANES_SPEND_Q.format("protecting the environment"), ANES_SPEND_OPTS),
+    # ---- ANES: health
+    ("ANES", "V242351", "health", "spend_health",
+     "Do you favor an increase, decrease, or no change in government spending to help people pay for "
+     "health insurance when people can't pay for it all themselves?", ["Increase", "Decrease", "No change"]),
+    ("ANES", "V241573", "health", None,
+     "How concerned are you about being able to pay health care expenses for you and your family in the "
+     "next year?", ["Not at all concerned", "A little concerned", "Moderately concerned", "Very concerned",
+                    "Extremely concerned"]),
+    # ---- ANES: immigration
+    ("ANES", "V241386", "immigration", "unauthorized",
+     "Which comes closest to your view about what government policy should be toward unauthorized "
+     "immigrants now living in the United States?",
+     ["Make all unauthorized immigrants felons and send them back to their home country",
+      "Have a guest worker program that allows unauthorized immigrants to remain in the US to work but "
+      "only for a limited amount of time",
+      "Allow unauthorized immigrants to remain in the US and qualify for citizenship if they meet certain "
+      "requirements",
+      "Allow unauthorized immigrants to remain in the US and qualify for citizenship without penalties"]),
+    ("ANES", "V242232", "immigration", "unauthorized",
+     "Do you favor, oppose, or neither favor nor oppose providing a path to citizenship for unauthorized "
+     "immigrants who obey the law, pay a fine, and pass security checks?", FAVOR3),
+    ("ANES", "V242227", "immigration", "immig_level",
+     "Do you think the number of immigrants from foreign countries who are permitted to come to the United "
+     "States to live should be increased a lot, increased a little, left the same as it is now, decreased "
+     "a little, or decreased a lot?",
+     ["Increased a lot", "Increased a little", "Left the same as it is now", "Decreased a little",
+      "Decreased a lot"]),
+    ("ANES", "V241393", "immigration", None,
+     "Do you favor, oppose, or neither favor nor oppose building a wall on the U.S. border with Mexico?",
+     FAVOR3),
+    ("ANES", "V241387", "immigration", None,
+     "Some people have proposed that the U.S. Constitution should be changed so that the children of "
+     "unauthorized immigrants do not automatically get citizenship if they are born in this country. Do "
+     "you favor, oppose, or neither favor nor oppose this proposal?", FAVOR3),
+    ("ANES", "V241390", "immigration", None,
+     "What should happen to immigrants who were brought to the U.S. illegally as children and have lived "
+     "here for at least 10 years and graduated high school here? Should they be sent back where they came "
+     "from, or should they be allowed to live and work in the United States?",
+     ["Should be sent back where they came from", "Should be allowed to live and work in the US"]),
+    ("ANES", "V242235", "immigration", "immig_econ",
+     "Are immigrants generally good or bad for America's economy?",
+     ["Extremely good", "Moderately good", "Slightly good", "Neither good nor bad", "Slightly bad",
+      "Moderately bad", "Extremely bad"]),
+    ("ANES", "V241267", "immigration", None,
+     ANES_SPEND_Q.format("tightening border security to prevent illegal immigration"), ANES_SPEND_OPTS),
+    # ---- ANES: other policies
+    ("ANES", "V241398", "policy", None,
+     "Do you favor, oppose, or neither favor nor oppose the United States giving weapons to help Ukraine "
+     "fight Russia?", FAVOR3),
+    ("ANES", "V241401", "policy", None,
+     "Do you favor, oppose, or neither favor nor oppose the United States giving military assistance to "
+     "Israel?", FAVOR3),
+    ("ANES", "V242322", "policy", None,
+     "Do you favor, oppose, or neither favor nor oppose increased government regulation on businesses that "
+     "produce a great deal of greenhouse emissions linked to climate change?", FAVOR3),
+    ("ANES", "V242326", "policy", None,
+     "Do you favor, oppose, or neither favor nor oppose requiring background checks for gun purchases at "
+     "gun shows or other private sales?", FAVOR3),
+    ("ANES", "V242329", "policy", None,
+     "Do you favor, oppose, or neither favor nor oppose banning the sale of semi-automatic "
+     "\"assault-style\" rifles?", FAVOR3),
+    ("ANES", "V241302", "policy", "abortion",
+     "There has been some discussion about abortion during recent years. Which one of the opinions on this "
+     "page best agrees with your view?",
+     ["By law, abortion should never be permitted",
+      "The law should permit abortion only in case of rape, incest, or when the woman's life is in danger",
+      "The law should permit abortion other than for rape/incest/danger to woman but only after need "
+      "clearly established",
+      "By law, a woman should always be able to obtain an abortion as a matter of personal choice"]),
+]
+V2_TOPIC_LABEL = {"economy": "Economy", "taxes": "Taxes and public spending", "health": "Health care",
+                  "immigration": "Immigration", "policy": "Other policies"}
+
+
+def age_cat(age):
+    return AGE_CATS[0 if age < 30 else 1 if age < 50 else 2 if age < 65 else 3]
+
+
+def gss_demo(r, why):
+    """Reduced profile of one GSS respondent, or None (reason counted in why)."""
+    sex = r["sexbirth1"] if pd.notna(r["sexbirth1"]) else r["sex"]  # Twin asks sex assigned at birth
+    deg, educ, inc = r["degree"], r["educ"], r["income16"]
+    if pd.isna(r["age"]):
+        return why.update(["age"])
+    if sex not in (1, 2):
+        return why.update(["sex"])
+    if deg not in (0, 1, 2, 3, 4):
+        return why.update(["education"])
+    if pd.isna(inc):
+        return why.update(["income"])
+    if inc == 22:  # $90,000-$109,999 straddles Twin's $100,000 boundary
+        return why.update(["income_90k_110k"])
+    edu = {0: 0, 1: 2 if pd.notna(educ) and educ >= 13 else 1, 2: 3, 3: 4, 4: 5}[int(deg)]
+    i = 0 if inc <= 15 else 1 if inc <= 18 else 2 if inc <= 20 else 3 if inc == 21 else 4
+    return {"age": age_cat(r["age"]), "sex": SEX_CATS[int(sex) - 1], "education": EDU_CATS[edu],
+            "family_income": INC_CATS[i], "region": REGION_CATS[int(r["region"]) - 1]}
+
+
+def anes_demo(r, why):
+    """Reduced profile (plus state) of one ANES respondent, or None (reason counted in why)."""
+    age, sex, e, ex, i, i6 = (r[v] for v in ("V241458x", "V241550", "V241463", "V241465x",
+                                             "V241566x", "V241567x"))
+    if age < 18:
+        return why.update(["age"])
+    if sex not in (1, 2):
+        return why.update(["sex"])
+    if 1 <= e <= 16:
+        edu = 0 if e <= 8 else 1 if e == 9 else 2 if e == 10 else 3 if e <= 12 else 4 if e == 13 else 5
+    elif ex in (1, 2, 4, 5):  # paper questionnaire or "Other": 5-category summary
+        edu = {1: 0, 2: 1, 4: 4, 5: 5}[ex]
+    else:  # summary code 3 "post-HS, no bachelor's" is some college or associate's: ambiguous
+        return why.update(["education"])
+    if 1 <= i <= 28:
+        inc = 0 if i <= 10 else 1 if i <= 14 else 2 if i <= 19 else 3 if i <= 22 else 4
+    elif i6 in (1, 2, 5, 6):  # paper questionnaire: 6-category summary
+        inc = 0 if i6 <= 2 else 4
+    else:  # $30,000-$59,999 or $60,000-$99,999 cross Twin's boundaries
+        return why.update(["income"])
+    return {"age": age_cat(age), "sex": SEX_CATS[int(sex) - 1], "education": EDU_CATS[edu],
+            "family_income": INC_CATS[inc], "region": REGION_CATS[int(r["V243007"]) - 1],
+            "state": US_STATES[r["V243001"]]}
+
+
+V2_PROFILE = [("age", "Age"), ("sex", "Sex"), ("education", "Education"),
+              ("family_income", "Family income"), ("region", "Region"), ("state", "State")]
+
+
+def v2_profile_text(d):
+    return "; ".join(f"{label}: {d[k]}" for k, label in V2_PROFILE if k in d)
+
+
+def load_gss(data_dir, cols):
+    import zipfile
+    with zipfile.ZipFile(data_dir / GSS_ZIP) as z, z.open(GSS_DTA) as f:
+        it = pd.read_stata(f, columns=cols, convert_categoricals=False, chunksize=10000)
+        return pd.concat([ch[ch["year"] >= GSS_FROM_YEAR] for ch in it], ignore_index=True)
+
+
+def load_anes(data_dir, cols):
+    import io
+    import zipfile
+    with zipfile.ZipFile(data_dir / ANES_ZIP) as z:
+        raw = z.read(ANES_CSV)
+    df = pd.read_csv(io.BytesIO(raw), encoding="cp1252", low_memory=False)
+    df.columns = [c.lstrip("﻿").lstrip("ï»¿") for c in df.columns]
+    return df[cols]
+
+
+def v2_records(data_dir, max_per_qid, seed, info):
+    """GSS and ANES units and answer records, capped at max_per_qid rows per question."""
+    by_source = collections.defaultdict(list)
+    for q in V2_QUESTIONS:
+        by_source[q[0]].append(q)
+    frames = {
+        "GSS": load_gss(data_dir, ["year", "id", "age", "sex", "sexbirth1", "degree", "educ", "income16",
+                                   "region"] + [q[1] for q in by_source["GSS"]]),
+        "ANES": load_anes(data_dir, ["V240001", "V241458x", "V241550", "V241463", "V241465x", "V241566x",
+                                     "V241567x", "V243007", "V243001"] + [q[1] for q in by_source["ANES"]]),
+    }
+    units, out = [], {}
+    for source in ("GSS", "ANES"):
+        df = frames[source]
+        why = collections.Counter()
+        people = []
+        for r in df.to_dict("records"):
+            if source == "GSS":
+                d, rid = gss_demo(r, why), f"GSS-{int(r['year'])}-{int(r['id'])}"
+            else:
+                d, rid = anes_demo(r, why), f"ANES-{int(r['V240001'])}"
+            if d:
+                people.append((rid, d, r))
+        info[source] = {"respondents": len(df), "kept": len(people), "dropped": dict(why)}
+        for src, var, topic, family, question, options in by_source[source]:
+            unit = f"{source}:{var}"
+            recs, skip = [], collections.Counter()
+            for rid, d, r in people:
+                v = r[var]
+                if pd.isna(v) or (source == "ANES" and v < 0 and v not in (-8, -9)):
+                    skip["missing"] += 1  # not asked / no post interview (GSS: also DK, IAP, no answer)
+                elif source == "ANES" and v in (-8, -9):
+                    skip["dk_refused"] += 1
+                elif not (1 <= v <= len(options)) or v != int(v):
+                    skip["other_code"] += 1  # e.g. ANES "Other {SPECIFY}", "haven't thought"
+                else:
+                    recs.append({"pid": None, "respondent": rid, "source": source, "demo": d,
+                                 "profile_text": v2_profile_text(d), "unit": unit, "qid": unit,
+                                 "item": unit, "kind": "mc", "block": f"{source} - {V2_TOPIC_LABEL[topic]}",
+                                 "family": f"v2:{family}" if family else unit, "topic": topic,
+                                 "question": question, "options": options, "answer": int(v) - 1})
+            info.setdefault("questions", {})[unit] = {"valid": len(recs), **skip}
+            if len(recs) > max_per_qid:
+                recs = random.Random(f"{seed}-v2cap-{unit}").sample(recs, max_per_qid)
+                recs.sort(key=lambda x: x["respondent"])
+            units.append({"qid": unit, "unit": unit, "kind": "mc", "block": recs[0]["block"],
+                          "family": recs[0]["family"], "topic": topic, "source": source})
+            out[unit] = recs
+    return units, out
+
+
+def assign_splits_v2(units, seed):
+    """Families split 80/10/10, stratified by source x topic (systematic sampling over shuffled strata).
+
+    A family shared by GSS and ANES has its own stratum "GSS+ANES" x topic."""
+    fam_sources, fam_topic = collections.defaultdict(set), {}
+    for u in units:
+        fam_sources[u["family"]].add(u["source"])
+        assert fam_topic.setdefault(u["family"], u["topic"]) == u["topic"], u["family"]
+    strata = collections.defaultdict(list)
+    for f, srcs in fam_sources.items():
+        strata[("+".join(sorted(srcs, reverse=True)), fam_topic[f])].append(f)
+    order = []
+    for key in sorted(strata):
+        fams = sorted(strata[key])
+        random.Random(f"{seed}-v2-families-{key[0]}-{key[1]}").shuffle(fams)
+        order += fams
+    offset = random.Random(f"{seed}-v2-offset").randrange(10)
+    split_of_family = {f: "val" if (i + offset) % 10 == 0 else "test" if (i + offset) % 10 == 5 else "train"
+                       for i, f in enumerate(order)}
+    return {u["unit"]: split_of_family[u["family"]] for u in units}
+
+
 # ----------------------------------------------------------------- output
 
 def write_jsonl(path, rows):
@@ -438,16 +890,21 @@ def main():
     ap.add_argument("--data-dir", type=Path,
                     default=Path(os.environ.get("DATA_DIR") or REPO_ROOT / "data" / "raw"),
                     help="root with Twin-2K-500/, Twin-2K-500-Mega-Study/, GlobalOpinionQA/")
-    ap.add_argument("--out-dir", type=Path, help="default: <data-dir>/processed")
-    ap.add_argument("--sample-out", type=Path, default=REPO_ROOT / "samples" / "train_sample.jsonl")
+    ap.add_argument("--out-dir", type=Path, help="default: <data-dir>/processed (--v2: <data-dir>/processed_v2)")
+    ap.add_argument("--sample-out", type=Path,
+                    help="default: samples/train_sample.jsonl in the repo (--v2: no sample unless given)")
     ap.add_argument("--max-per-qid", type=int, default=3000, help="row cap per Matrix QID")
     ap.add_argument("--partial-frac", type=float, default=0.5,
                     help="share of train examples with the reduced profile")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--format", choices=["prompt-completion", "messages"], default="prompt-completion",
                     help="prompt-completion: loss on the answer only; messages: one conversation list")
+    ap.add_argument("--v2", action="store_true",
+                    help="version 2: also add GSS 2016+ and ANES 2024 Time Series (reads GSS/ and ANES/)")
     args = ap.parse_args()
-    out = args.out_dir or args.data_dir / "processed"
+    out = args.out_dir or args.data_dir / ("processed_v2" if args.v2 else "processed")
+    if args.sample_out is None and not args.v2:
+        args.sample_out = REPO_ROOT / "samples" / "train_sample.jsonl"
     out.mkdir(parents=True, exist_ok=True)
     stats = collections.Counter()
 
@@ -475,15 +932,31 @@ def main():
         for rec in splits[name]:
             rec["profile"] = "full"
 
+    v2_info = {}
+    if args.v2:
+        # Twin rows keep the v1 profiles; GSS/ANES rows only have the reduced profile (ANES: + state)
+        v2_units, v2_by_unit = v2_records(args.data_dir, args.max_per_qid, args.seed, v2_info)
+        v2_split = assign_splits_v2(v2_units, args.seed)
+        for u in v2_units:
+            for rec in v2_by_unit[u["unit"]]:
+                rec["split"], rec["profile"] = v2_split[u["unit"]], "partial"
+                splits[rec["split"]].append(rec)
+        random.Random(f"{args.seed}-v2-shuffle").shuffle(splits["train"])
+        units += v2_units
+        split_of.update(v2_split)
+
     def twin_row(rec, profile, meta):
-        row = chat(args.format, profile_text(demo[rec["pid"]], profile),
-                   rec["question"], rec["options"], rec["answer"])
+        text = rec["profile_text"] if "profile_text" in rec else profile_text(demo[rec["pid"]], profile)
+        row = chat(args.format, text, rec["question"], rec["options"], rec["answer"])
         if meta:
             row.update({k: rec[k] for k in ("pid", "qid", "item", "kind", "block")})
             row["n_options"] = len(rec["options"])
-            row["profile"] = profile
+            row["profile"] = rec["profile"] if "profile_text" in rec else profile
             if rec["kind"] == "pricing":
                 row.update({k: rec[k] for k in ("product", "price", "answer_wave4")})
+            if args.v2:
+                row["source"] = rec.get("source", "Twin-2K-500")
+                row["respondent"] = rec.get("respondent", f"Twin-{rec['pid']}")
         return row
 
     files = {
@@ -512,16 +985,23 @@ def main():
 
     for name, rows in files.items():
         write_jsonl(out / name, rows)
-    args.sample_out.parent.mkdir(parents=True, exist_ok=True)
-    write_jsonl(args.sample_out, random.Random(f"{args.seed}-sample").sample(files["train.jsonl"], 100))
+    if args.sample_out:
+        args.sample_out.parent.mkdir(parents=True, exist_ok=True)
+        write_jsonl(args.sample_out, random.Random(f"{args.seed}-sample").sample(files["train.jsonl"], 100))
 
     # tabular twin of the Twin-2K-500 files, for a CatBoost baseline
     tab = []
     for name in ("train", "val", "test", "eval_pricing"):
         for r in splits[name]:
             row = {"pid": r["pid"], "split": name, "profile": r["profile"]}
-            row.update({DEMO_LABEL[q].lower().replace(" ", "_").replace("/", "_"): demo[r["pid"]][q]
-                        for q, _ in DEMOGRAPHICS})
+            if "demo" in r:  # GSS/ANES: reduced profile only (+ state for ANES)
+                row.update(r["demo"])
+            else:
+                row.update({DEMO_LABEL[q].lower().replace(" ", "_").replace("/", "_"): demo[r["pid"]][q]
+                            for q, _ in DEMOGRAPHICS})
+            if args.v2:
+                row["source"] = r.get("source", "Twin-2K-500")
+                row["respondent"] = r.get("respondent", f"Twin-{r['pid']}")
             row.update({k: r[k] for k in ("unit", "qid", "item", "family", "block", "kind", "question")})
             row["options"] = " | ".join(r["options"])
             row["n_options"] = len(r["options"])
@@ -529,19 +1009,84 @@ def main():
             row["answer_letter"] = LETTERS[r["answer"]]
             row["answer_wave4_letter"] = r.get("answer_wave4")
             tab.append(row)
-    pd.DataFrame(tab).to_csv(out / "tabular.csv", index=False)
+    tab_df = pd.DataFrame(tab)
+    if args.v2:  # v1 column order, then the v2 columns; pid stays an integer (empty for GSS/ANES)
+        v1_cols = [c for c in tab_df.columns if c not in ("source", "respondent", "state")]
+        first_twin = next(r for r in tab if r["source"] == "Twin-2K-500")
+        tab_df = tab_df[[c for c in first_twin if c in v1_cols] + ["source", "respondent", "state"]]
+        tab_df["pid"] = tab_df["pid"].astype("Int64")
+    tab_df.to_csv(out / "tabular.csv", index=False)
 
-    write_data_md(out, args, files, kinds, splits, units, split_of, stats)
+    write_data_md(out, args, files, kinds, splits, units, split_of, stats, v2_info)
     for name, rows in files.items():
         print(f"{name:28s} {len(rows):>9,}")
     print(f"{'tabular.csv':28s} {len(tab):>9,}")
     print("stats:", dict(stats))
 
 
-def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
+def v2_data_md(args, files, kinds, units, split_of, info):
+    md = ["## How the GSS and ANES rows were made (v2)", "",
+          f"- GSS: cumulative Stata file, waves {GSS_FROM_YEAR}-2024 (`{GSS_ZIP}`, read inside the zip). "
+          f"ANES: 2024 Time Series CSV (`{ANES_ZIP}`, cp1252, BOM stripped).",
+          "- Single-answer questions on the economy, taxes and public spending, health care, immigration and "
+          "other policies. For ANES the base question is used, not the `x` summary that merges it with its "
+          "follow-up. Question text is from the GSS 2024 codebook (Release 3a) or, where its label is cut "
+          "at 255 characters, from the GSS cumulative codebook on SDA Berkeley; ANES text is from the 2024 "
+          "codebook in forward response order. Interviewer instructions and show-card references are "
+          "removed; for the GSS spending items the shared intro and the item are joined into one question.",
+          "- Options are the codebook value labels. Dropped: missing answers (not asked, no post-election "
+          "interview; for the GSS also \"don't know\", \"no answer\" and \"skipped\", which the Stata file "
+          "stores as missing), ANES \"don't know\" / \"refused\", and codes outside the options (ANES "
+          "abortion \"Other {SPECIFY}\").",
+          "- Profile: Twin's reduced profile (age, sex, education, family income, region) with Twin's "
+          "categories; ANES rows also carry the state. Respondents with any field missing or ambiguous are "
+          "dropped (table below). GSS: `age`; `sexbirth1` (sex assigned at birth, as Twin asks), else `sex`; "
+          "`degree` + `educ` (high school with 13+ years of school = some college, no degree); `income16`, "
+          "where $90,000-$109,999 crosses Twin's $100,000 boundary and is dropped; `region`. ANES: "
+          "`V241458x`; `V241550`; `V241463` (else the 5-category `V241465x`, whose \"some post-high "
+          "school\" code is dropped as some college vs associate's is unknown); `V241566x` (else the "
+          "6-category `V241567x` of the paper questionnaire, whose $30-60k and $60-100k codes are dropped); "
+          "`V243007`; `V243001`.",
+          f"- At most {args.max_per_qid:,} rows per question, sampled at random with a fixed seed.",
+          "- Split per question, 80/10/10 over families, stratified by source x topic (families are shuffled "
+          "within each stratum and every 10th goes to val, the 5th after it to test). A family holds the GSS "
+          "split-ballot variants of one item (e.g. `natfare` / `natfarey`) and the questions that measure the "
+          "same attitude in both surveys (e.g. GSS `letin1a` and ANES `V242227` on immigration levels), so "
+          "they never sit on both sides of a split. GSS/ANES rows always use the reduced profile, so they "
+          "are the same in `test.jsonl` and `test_partial.jsonl`.",
+          "- Metadata in the test and eval files: `source` (Twin-2K-500 / GSS / ANES) and `respondent` "
+          "(`Twin-<pid>`, `GSS-<year>-<id>`, `ANES-<V240001>`); `pid` is null for GSS/ANES. `tabular.csv` "
+          "has the same two columns plus `state`.", ""]
+    rows = []
+    for name in ("train.jsonl", "val.jsonl", "test.jsonl", "test_partial.jsonl"):
+        c = collections.Counter(r.get("source", "Twin-2K-500") for r in kinds[name])
+        rows.append([f"`{name}`"] + [f"{c[s]:,}" for s in ("Twin-2K-500", "GSS", "ANES")]
+                    + [f"{len(files[name]):,}"])
+    md += ["Rows per source:", "", table(["file", "Twin-2K-500", "GSS", "ANES", "total"], rows), ""]
+    reasons = sorted({k for s in ("GSS", "ANES") for k in info[s]["dropped"]})
+    md += ["Respondents:", "",
+           table(["source", "respondents", "kept"] + [f"dropped: {k}" for k in reasons],
+                 [[s, f"{info[s]['respondents']:,}", f"{info[s]['kept']:,}"]
+                  + [f"{info[s]['dropped'].get(k, 0):,}" for k in reasons] for s in ("GSS", "ANES")]), ""]
+    v2_units = [u for u in units if "source" in u]
+    order = {"train": 0, "val": 1, "test": 2}
+    rows = []
+    for u in sorted(v2_units, key=lambda u: (order[split_of[u["unit"]]], u["source"], u["topic"], u["unit"])):
+        q = info["questions"][u["unit"]]
+        rows.append([f"`{u['unit']}`", split_of[u["unit"]], V2_TOPIC_LABEL[u["topic"]], f"`{u['family']}`",
+                     f"{q['valid']:,}", f"{min(q['valid'], args.max_per_qid):,}",
+                     f"{q.get('missing', 0):,}", f"{q.get('dk_refused', 0):,}", f"{q.get('other_code', 0):,}"])
+    md += ["Questions (valid = answers from kept respondents, before the cap):", "",
+           table(["question", "split", "topic", "family", "valid", "rows", "missing", "dk/refused",
+                  "other code"], rows), ""]
+    return md
+
+
+def write_data_md(out, args, files, kinds, splits, units, split_of, stats, v2_info):
     cmd = (f"python -I scripts/build_dataset.py --data-dir {shlex.quote(str(args.data_dir))} "
            f"--out-dir {shlex.quote(str(out))} --max-per-qid {args.max_per_qid} "
-           f"--partial-frac {args.partial_frac} --seed {args.seed} --format {args.format}")
+           f"--partial-frac {args.partial_frac} --seed {args.seed} --format {args.format}"
+           + (" --v2" if args.v2 else ""))
     cols = "`messages`" if args.format == "messages" else "`prompt` + `completion`"
     kind_names = ["mc", "likert", "bipolar", "pricing"]
     dk_units = [u["unit"] for u in units if any(DK_RE.search(o) for _, _, opts in u.get("items", []) for o in opts)]
@@ -570,7 +1115,18 @@ def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
           "  Toubia et al., *Twin-2K-500: A dataset for building digital twins of over 2,000 people based on "
           "their answers to over 500 questions*, arXiv:2505.17479.",
           "- **Twin-2K-500-Mega-Study** (Apache-2.0): eval_megastudy only.",
-          "- **GlobalOpinionQA** (Anthropic/llm_global_opinions): eval_globalopinionqa only.", "",
+          "- **GlobalOpinionQA** (Anthropic/llm_global_opinions): eval_globalopinionqa only.", ""]
+    if args.v2:
+        md[-1:] = [
+            "- **GSS** 1972-2024 cumulative file, Release 3a (NORC), waves 2016-2024: train/val/test. "
+            "Cite: Davern, Michael; Bautista, Rene; Freese, Jeremy; Herd, Pamela; and Morgan, Stephen L. "
+            "General Social Survey 1972-2024. [Machine-readable data file]. NORC ed. Chicago, 2026. "
+            "1 datafile and 1 codebook (2024 Release 3a).",
+            "- **ANES** 2024 Time Series, full release 2026-05-19: train/val/test. Research and statistical "
+            "use only; do not redistribute these files. Cite: American National Election Studies. 2026. "
+            "ANES 2024 Time Series Study Full Release [dataset and documentation]. May 19, 2026 version. "
+            "www.electionstudies.org", ""]
+    md += [
           "## Rows per file and question type", "",
           "Question types: `mc` = single-answer multiple choice, `likert` / `bipolar` = one Matrix row, "
           "`pricing` = buy / not buy a product at a price.", ""]
@@ -614,8 +1170,9 @@ def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
            "full profile; `test_partial.jsonl` is the test set with the reduced profile.",
            f"- train and val have only {cols} (what SFTTrainer reads); test and eval files also carry "
            "metadata (`pid`, `qid`, `item`, `kind`, ...).", ""]
-    prof = collections.Counter(r["profile"] for r in splits["train"])
-    md += [f"Train profiles: {prof['full']:,} full, {prof['partial']:,} partial.", ""]
+    prof = collections.Counter(r["profile"] for r in splits["train"] if "source" not in r)
+    md += [f"Train profiles{' (Twin-2K-500 rows)' if args.v2 else ''}: "
+           f"{prof['full']:,} full, {prof['partial']:,} partial.", ""]
     for name, label in (("eval_pricing", "held-out products"), ("train", "train products")):
         recs = [r for r in splits[name] if r["kind"] == "pricing"]
         agree = [r["answer_wave4"] == LETTERS[r["answer"]] for r in recs if r.get("answer_wave4")]
@@ -646,6 +1203,9 @@ def write_data_md(out, args, files, kinds, splits, units, split_of, stats):
                  [[k[0], k[1], f"{v:,}"] for k, v in sorted(stats.items(), key=lambda kv: str(kv[0])) if isinstance(k, tuple)]), "",
            "Other counters: " + (", ".join(f"{k} = {v:,}" for k, v in sorted(stats.items(), key=lambda kv: str(kv[0]))
                                            if not isinstance(k, tuple)) or "none"), ""]
+
+    if args.v2:
+        md += v2_data_md(args, files, kinds, units, split_of, v2_info)
 
     md += ["## Answer distribution", "",
            "Share of each answer letter per file (GlobalOpinionQA: majority letter per question x country).", ""]
