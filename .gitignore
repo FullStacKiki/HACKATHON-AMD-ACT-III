@@ -3,3 +3,15 @@ data/
 
 # huggingface_hub download metadata
 .cache/
+
+# macOS
+.DS_Store
+
+# Secrets: never commit. Only the variable names go in .env.example
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc

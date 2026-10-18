@@ -29,6 +29,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Evolus agents: /api/questions and /api/briefing
+from backend.evolus_routes import router as evolus_router
+app.include_router(evolus_router)
+from backend.panel_routes import router as panel_router
+app.include_router(panel_router)
+
 # Static directory
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(exist_ok=True)
