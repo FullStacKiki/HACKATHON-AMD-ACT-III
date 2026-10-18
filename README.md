@@ -28,22 +28,25 @@ app shows clearly labelled example data under an **"Example data"** banner.
 ## A real run
 
 Idea: *a weekly box of ready-to-cook meals for busy college students*, priced at $9. 100 respondents sampled from Twin-2K-500, each played by
-DeepSeek-V4-Flash through the AMD Token Factory, the survey designed by an Evolus agent. 100 of 100 answered, in 431 seconds.
+DeepSeek-V4-Flash through the AMD Token Factory, the survey designed by an Evolus agent. 100 of 100 answered, in 394 seconds.
+The respondents are **weighted to represent US adults** (ACS 2024: age band, sex, education, region), see "Post-stratification" below.
 
-| Result | Value |
-| --- | --- |
-| Would buy at $9 | **27%** (95% bootstrap interval 19% to 36%) |
-| Would buy only at a lower price | 54% |
-| Would not buy | 19% |
-| Viability score | 29 (range 23 to 35) |
-| Largest segment gap | income over $100k: 50%, under $50k: 14% |
-| Main objections | price 42%, quality of ingredients 28% |
+| Result | Weighted (shown in the app) | Unweighted |
+| --- | --- | --- |
+| Would buy at $9 | **27%** (95% interval 19% to 39%) | 30% (21% to 40%) |
+| Would buy only at a lower price | 44% | n/a |
+| Viability score | 18 (range 13 to 24) | 18 (range 14 to 24) |
+| Effective sample size (Kish) | 74.8 of 100 | 100 |
+| Income over $100k / under $50k | 46% / 17% | 46% / 17% |
+| Main objections | price 42%, already using alternatives 17% | price 41% |
 
-| Price per week | $5.40 | $7.20 | $9.00 | $10.80 | $12.60 |
+| Price | $5.4 | $7.2 | $9 | $10.8 | $12.6 |
 | --- | --- | --- | --- | --- | --- |
-| Would buy | 81% | 69% | 27% | 0% | 0% |
+| Would buy (weighted) | 66% | 52% | 27% | 0% | 0% |
+| Would buy (unweighted) | 71% | 58% | 30% | 0% | 0% |
 
-The sharp drop just above $9 is how the model answered; we report it as measured, not as a forecast of real demand.
+Weighting moves the estimates by a few points and widens the intervals; it does not change the picture. The sharp drop just above $9 is how the model
+answered; we report it as measured, not as a forecast of real demand.
 
 ## How it works
 
@@ -62,8 +65,9 @@ flowchart LR
 
 1. **Survey:** the pitch goes to the *US Survey Question Designer* agent on Evolus, which returns 10 to 14 neutral questions: purchase intent at five prices, interest, value for money, trust, recommendation, current alternatives, main feature and main concern.
 2. **Panel:** 100 people are sampled from Twin-2K-500 with their reduced profile (age, sex, education, family income, region). Each person gets one call with all the questions and answers as JSON `{"q1":"A",...}`. At most 5 calls run at once, with exponential backoff on HTTP 429.
-3. **Aggregation:** shares are counted from the answers; every interval comes from 1,000 bootstrap resamples of the respondents (2.5th to 97.5th percentile). The formulas are in the docstring of [`backend/panel.py`](backend/panel.py).
-4. **Briefing:** the results and the revenue-maximizing price (worked out by the backend) go to the *Consumer Panel Briefing* agent, which writes the briefing as JSON. The JSON is cleaned (code fences removed), validated and retried once; the frontend turns it into a PDF.
+3. **Post-stratification:** the 100 respondents are weighted by raking (iterative proportional fitting) to the ACS 2024 5-year shares of US adults by age band, sex, education and region (`backend/data/census_targets.json`, built from the Census Bureau API by `scripts/BuildCensusTargets.py`). Weights are kept between 0.2 and 5 and normalized; the effective sample size (Kish) is shown in the dashboard. Education targets are for adults 25+ (the only ACS population with education), and no one in a 100-person sample has less than a high school diploma, so that cell cannot be reached.
+4. **Aggregation:** shares are counted from the answers; shares are weighted and every interval comes from 1,000 weighted bootstrap resamples of the respondents (2.5th to 97.5th percentile; the weights are not re-estimated inside each resample). The formulas are in the docstring of [`backend/panel.py`](backend/panel.py).
+5. **Briefing:** the results and the revenue-maximizing price (worked out by the backend) go to the *Consumer Panel Briefing* agent, which writes the briefing as JSON. The JSON is cleaned (code fences removed), validated and retried once; the frontend turns it into a PDF.
 
 ## Architecture
 

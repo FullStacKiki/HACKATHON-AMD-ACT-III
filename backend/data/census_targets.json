@@ -1,0 +1,69 @@
+{
+ "source": "U.S. Census Bureau, American Community Survey 5-Year Estimates",
+ "year": 2024,
+ "urls": {
+  "B01001 (sex by age)": "https://data.census.gov/api/access/data/table?id=ACSDT5Y2024.B01001&g=0100000US&tid=ACSDT5Y2024.B01001",
+  "B15003 (educational attainment, population 25 years and over)": "https://data.census.gov/api/access/data/table?id=ACSDT5Y2024.B15003&g=0100000US&tid=ACSDT5Y2024.B15003",
+  "B01001 by region": "https://data.census.gov/api/access/data/table?id=ACSDT5Y2024.B01001&g=0200000US{1..4}"
+ },
+ "fetched": "2026-10-18",
+ "population": {
+  "age, sex, region": "adults 18 and over",
+  "education": "adults 25 and over (the ACS publishes education only from age 25)"
+ },
+ "notes": [
+  "Age bands and education labels follow Twin-2K-500. 'College graduate/some postgrad' is bachelor's degrees; 'Postgraduate' is master's, professional and doctorate."
+ ],
+ "targets": {
+  "age": {
+   "18-29": 0.202691,
+   "30-49": 0.335325,
+   "50-64": 0.241508,
+   "65+": 0.220477
+  },
+  "sex": {
+   "Male": 0.490336,
+   "Female": 0.509664
+  },
+  "region": {
+   "Northeast": 0.174926,
+   "Midwest": 0.205493,
+   "South": 0.383438,
+   "West": 0.236143
+  },
+  "education": {
+   "Less than high school": 0.10395,
+   "High school graduate": 0.260367,
+   "Some college, no degree": 0.190783,
+   "Associate's degree": 0.088051,
+   "College graduate/some postgrad": 0.21606,
+   "Postgraduate": 0.140789
+  }
+ },
+ "counts": {
+  "age": {
+   "18-29": 52984325.0,
+   "30-49": 87655520.0,
+   "50-64": 63131192.0,
+   "65+": 57633628.0
+  },
+  "sex": {
+   "Male": 128176146.0,
+   "Female": 133228519.0
+  },
+  "region": {
+   "Northeast": 45726475.0,
+   "Midwest": 53716730.0,
+   "South": 100232465.0,
+   "West": 61728995.0
+  },
+  "education": {
+   "Less than high school": 23992410.0,
+   "High school graduate": 60094716.0,
+   "Some college, no degree": 44034048.0,
+   "Associate's degree": 20322913.0,
+   "College graduate/some postgrad": 49868171.0,
+   "Postgraduate": 32495045.0
+  }
+ }
+}

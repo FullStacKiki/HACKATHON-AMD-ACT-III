@@ -145,13 +145,84 @@ def _dimension(q: Q) -> str | None:
     return None
 
 
-def _ci(values: list[float], sets: list[list[int]]) -> tuple[float, float]:
-    means = sorted(sum(values[i] for i in s) / len(s) for s in sets)
+# ---- Post-stratification ------------------------------------------------------------------------------------------------
+
+CENSUS_FILE = Path(__file__).resolve().parent / "data" / "census_targets.json"
+WEIGHT_CAPS = (0.2, 5.0)
+RAKE_ON = (("age", "age"), ("sex", "sex"), ("education", "education"), ("region", "region"))  # (target key, key in the Twin profile)
+
+
+def load_targets() -> dict:
+    try:
+        return json.loads(CENSUS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise PanelError(f"Census targets not found ({CENSUS_FILE.name}): run scripts/BuildCensusTargets.py") from e
+
+
+def rake(people: list[dict], census: dict) -> tuple[list[float], dict]:
+    """Raking (iterative proportional fitting) of the respondents to the ACS shares of US adults by age band, sex, education and region.
+    Weights are kept between 0.2 and 5 and normalised to a mean of 1. A category nobody in the panel belongs to cannot be reached: the targets
+    of the other categories are rescaled to add up to 1 and the gap is reported. Returns the weights and a diagnosis (Kish effective size, fit)."""
+    n = len(people)
+    w = [1.0] * n
+    margins = []
+    for tkey, pkey in RAKE_ON:
+        present = {p[pkey] for p in people}
+        t = {c: v for c, v in census["targets"][tkey].items() if c in present}
+        tot = sum(t.values())
+        margins.append((tkey, pkey, {c: v / tot for c, v in t.items()}))
+    for _ in range(100):  # trim, then rake again, until the weights no longer move
+        for _ in range(200):
+            moved = 0.0
+            for _, pkey, t in margins:
+                tot = sum(w)
+                cat = {c: sum(wi for wi, p in zip(w, people) if p[pkey] == c) for c in t}
+                f = {c: t[c] * tot / cat[c] for c in t}
+                moved = max(moved, max(abs(f[c] - 1) for c in t))
+                w = [wi * f[p[pkey]] for wi, p in zip(w, people)]
+            if moved < 1e-9:
+                break
+        m = sum(w) / n
+        clipped = [min(WEIGHT_CAPS[1], max(WEIGHT_CAPS[0], wi / m)) for wi in w]
+        done = max(abs(a - wi / m) for a, wi in zip(clipped, w)) < 1e-9
+        w = clipped
+        if done:
+            break
+    m = sum(w) / n
+    w = [wi / m for wi in w]
+    tot = sum(w)
+    fit, worst, missing = {}, 0.0, {}
+    for tkey, pkey, _ in margins:
+        got = {c: round(sum(wi for wi, p in zip(w, people) if p[pkey] == c) / tot, 4) for c in census["targets"][tkey]}
+        fit[tkey] = {c: {"target": round(census["targets"][tkey][c], 4), "weighted": got[c], "unweighted": round(sum(1 for p in people if p[pkey] == c) / n, 4)} for c in got}
+        worst = max(worst, max(abs(got[c] - census["targets"][tkey][c]) for c in got if any(p[pkey] == c for p in people)))
+        missing[tkey] = [c for c in got if not any(p[pkey] == c for p in people)]
+    return w, {
+        "method": "raking (IPF) on age band, sex, education and region", "source": f"{census['source']} {census['year']}", "year": census["year"],
+        "weightRange": [round(min(w), 2), round(max(w), 2)], "caps": list(WEIGHT_CAPS),
+        "effectiveN": round(tot * tot / sum(wi * wi for wi in w), 1), "kish": "(sum of weights)^2 / sum of squared weights",
+        "largestMarginGap": round(worst, 4), "categoriesNobodyIn": {k: v for k, v in missing.items() if v}, "fit": fit,
+    }
+
+
+# ---- Aggregation ----------------------------------------------------------------------------------------------------
+
+def _ci(values: list[float], sets: list[list[int]], w: list[float]) -> tuple[float, float]:
+    """Weighted bootstrap: resample the respondents (each keeps its weight) and take the weighted mean of every resample."""
+    means = sorted(sum(w[i] * values[i] for i in s) / sum(w[i] for i in s) for s in sets)
     return round(100 * means[int(0.025 * len(means))], 1), round(100 * means[int(0.975 * len(means)) - 1], 1)
 
 
-def aggregate(people: list[dict], answers: list[dict[str, int]], qs: list[Q], price: float | None, seed: int, runtime: float, requested: int) -> dict[str, Any]:
+def aggregate(people: list[dict], answers: list[dict[str, int]], qs: list[Q], price: float | None, seed: int, runtime: float, requested: int,
+              weights: list[float] | None = None) -> dict[str, Any]:
     n = len(people)
+    w = weights or [1.0] * n
+
+    def wmean(vals, idx=None):
+        idx = range(n) if idx is None else idx
+        tw = sum(w[i] for i in idx)
+        return sum(w[i] * vals[i] for i in idx) / tw if tw else 0.0
+
     prices = sorted({q.price for q in qs if q.price is not None})
     pq = {q.price: q for q in qs if q.price is not None}
     base = min(prices, key=lambda p: abs(p - price)) if price is not None else prices[len(prices) // 2]
@@ -175,15 +246,15 @@ def aggregate(people: list[dict], answers: list[dict[str, int]], qs: list[Q], pr
 
     rng = random.Random(seed)
     sets = [[rng.randrange(n) for _ in range(n)] for _ in range(BOOTSTRAPS)]
-    score = round(sum(score_i) / n, 1)
-    s_lo, s_hi = _ci([v / 100 for v in score_i], sets)
-    b_lo, b_hi = _ci(buy, sets)
+    score = round(wmean(score_i), 1)
+    s_lo, s_hi = _ci([v / 100 for v in score_i], sets, w)
+    b_lo, b_hi = _ci(buy, sets, w)
 
     wtp = []
     for p in prices:
         vals = [1.0 if y.get(p) else 0.0 for y in yes_at]
-        lo, hi = _ci(vals, sets)
-        wtp.append({"price": p, "share": round(100 * sum(vals) / n, 1), "low": lo, "high": hi})
+        lo, hi = _ci(vals, sets, w)
+        wtp.append({"price": p, "share": round(100 * wmean(vals), 1), "low": lo, "high": hi})
 
     def seg_of(person: dict, group: str) -> str:
         return person["age"] if group == "age" else INCOME_GROUP.get(person["income"], person["income"]) if group == "income" else person["party"]
@@ -195,23 +266,24 @@ def aggregate(people: list[dict], answers: list[dict[str, int]], qs: list[Q], pr
         for lab in labels:
             idx = [i for i, p in enumerate(people) if seg_of(p, group) == lab]
             if len(idx) >= 5:
-                rows.append({"label": lab, "value": round(100 * sum(buy[i] for i in idx) / len(idx), 1), "n": len(idx)})
+                rows.append({"label": lab, "value": round(100 * wmean(buy, idx), 1), "n": len(idx)})
         segments[group] = rows
     for lab in sorted({p["age"] for p in people}):
         idx = [i for i, p in enumerate(people) if p["age"] == lab]
         if len(idx) >= 15:
-            views.append({"question": "Price", "segment": lab, "points": [{"price": p, "share": round(100 * sum(1 for i in idx if yes_at[i].get(p)) / len(idx), 1)} for p in prices]})
+            views.append({"question": "Price", "segment": lab, "points": [{"price": p, "share": round(100 * wmean([1.0 if y.get(p) else 0.0 for y in yes_at], idx), 1)} for p in prices]})
 
     concern = next((q for q in qs if q.price is None and "concern" in q.text.lower()), None)
     objections = []
     if concern:
-        counts = {}
-        for b, a in zip(buy, answers):
+        mass: dict[str, float] = {}
+        for i, (b, a) in enumerate(zip(buy, answers)):
             if not b and concern.key in a:
-                counts[concern.options[a[concern.key]]] = counts.get(concern.options[a[concern.key]], 0) + 1
-        objections = [{"text": t, "share": round(100 * c / n, 1)} for t, c in sorted(counts.items(), key=lambda kv: -kv[1])][:5]
+                t = concern.options[a[concern.key]]
+                mass[t] = mass.get(t, 0.0) + w[i]
+        objections = [{"text": t, "share": round(100 * m / sum(w), 1)} for t, m in sorted(mass.items(), key=lambda kv: -kv[1])][:5]
 
-    r_buy, r_und = round(100 * sum(buy) / n), round(100 * sum(undecided) / n)
+    r_buy, r_und = round(100 * wmean(buy)), round(100 * wmean(undecided))
     return {
         "score": round(score), "scoreRange": {"low": round(s_lo), "high": round(s_hi)},
         "reactions": {"buy": r_buy, "undecided": r_und, "no": 100 - r_buy - r_und},
@@ -253,7 +325,16 @@ async def run_panel(pitch: str, audience: str | None = None, category: str | Non
     ok = [(p, a) for p, a in zip(people, results) if a is not None and all(q.key in a for q in qs if q.price is not None)]
     if len(ok) < MIN_OK * len(people):
         raise PanelError(f"only {len(ok)} of {len(people)} respondents answered")
-    out = aggregate([p for p, _ in ok], [a for _, a in ok], qs, price, seed, time.monotonic() - started, len(people))
+    kept, given = [p for p, _ in ok], [a for _, a in ok]
+    census = load_targets()
+    weights, weighting = rake(kept, census)
+    runtime = time.monotonic() - started
+    out = aggregate(kept, given, qs, price, seed, runtime, len(people), weights)
+    out["run"]["effectiveN"] = weighting["effectiveN"]
+    out["weighting"] = weighting
+    plain = aggregate(kept, given, qs, price, seed, runtime, len(people))   # the same answers without weights, to compare
+    out["unweighted"] = {"buy": plain["reactions"]["buy"], "buyInterval": plain["buyInterval"], "score": plain["score"], "scoreRange": plain["scoreRange"],
+                         "wtp": plain["wtp"], "segments": plain["segments"], "objections": plain["objections"]}
     out["questions"] = questions
     return out
 

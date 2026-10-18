@@ -36,12 +36,13 @@ export default function ResultsDashboard({ data: payload, idea, onRestart, onApp
           <div>
             <p className="label">Would buy{idea ? <span className="text-zinc-600"> &middot; </span> : null}<span className="line-clamp-1 inline text-zinc-500">{idea}</span></p>
             <p className="dot mt-3 text-[clamp(4rem,10vw,7.5rem)]" style={{ color: buy !== null && !scanning ? "var(--text)" : "var(--dim)" }}>{buy !== null && !scanning ? `${Math.round(buy)}%` : "--"}</p>
-            <p className="label mt-3">{scanning ? (status || "Analyzing your idea") : buy === null ? "Not available yet: the API has not returned the share that would buy." : iv && typeof iv.low === "number" && typeof iv.high === "number" ? `Interval ${Math.round(iv.low)}% to ${Math.round(iv.high)}%` : "Interval: not available yet"}</p>
+            <p className="label mt-3">{scanning ? (status || "Analyzing your idea") : buy === null ? "Not available yet: the API has not returned the share that would buy." : iv && typeof iv.low === "number" && typeof iv.high === "number" ? `Interval ${Math.round(iv.low)}% to ${Math.round(iv.high)}%` : "Interval: not available yet"}{data?.weighting ? ` \u00b7 weighted to US adults (ACS ${data.weighting.year})` : ""}</p>
           </div>
           <div className="flex flex-wrap items-stretch gap-3">
             <div className="panel flex items-center gap-6 rounded-[22px] px-5 py-3">
               <div><p className="label">Run</p><p className="mt-1 text-sm text-zinc-200">{scanning ? "Running" : data ? "Done" : "No run yet"}</p></div>
               <div><p className="label">Personas</p><p className="num mt-1 text-sm text-zinc-100">{typeof n === "number" ? n : "n/a"}</p></div>
+              {typeof data?.run?.effectiveN === "number" && <div><p className="label" title="Kish effective sample size of the weighted panel">Effective n</p><p className="num mt-1 text-sm text-zinc-100">{Math.round(data.run.effectiveN)}</p></div>}
               <div><p className="label">Runtime</p><p className="num mt-1 text-sm text-zinc-100">{time ?? "n/a"}</p></div>
             </div>
             <Link to="/app/new" onClick={onRestart} className="btn btn-accent self-center px-5 py-3 text-sm"><Plus size={16} aria-hidden /> New simulation</Link>
