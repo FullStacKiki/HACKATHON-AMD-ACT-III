@@ -92,9 +92,9 @@ function Hero() {
             </div>
           </Reveal>
           <Reveal delay={600} className="text-xs leading-relaxed text-zinc-400 lg:text-right">
-            <p className="flex items-center gap-2 text-zinc-300 lg:justify-end"><span className="h-1.5 w-1.5 rounded-full bg-accent" />Trained on 2,058 real US consumers</p>
+            <p className="flex items-center gap-2 text-zinc-300 lg:justify-end"><span className="h-1.5 w-1.5 rounded-full bg-accent" />Built from 2,058 real US consumers</p>
             <p className="mt-1 font-medium text-zinc-200">Synthetic consumer panel</p>
-            <p>Built with AMD Instinct, ROCm, vLLM and Evolus</p>
+            <p>Built with the AMD Token Factory and Evolus</p>
           </Reveal>
         </div>
       </div>
@@ -102,12 +102,12 @@ function Hero() {
   );
 }
 
-// Facts that are true today. Anything not confirmed yet stays [TBD].
+// Facts that are true today. Only what is confirmed.
 const FACTS = [
   { big: 2058, fmt: (n) => n.toLocaleString("en-US"), title: "US consumers", text: "Real survey respondents stand behind the panel." },
   { big: 3, title: "Survey datasets", text: "Twin-2K-500, GSS and ANES." },
   { big: "Hundreds", title: "Simulated people per run", text: "Each one answers as a real respondent would." },
-  { big: "Millions", title: "Simulations", text: "Run on an open model fine-tuned on AMD Instinct GPUs with ROCm." },
+  { big: "Millions", title: "Simulations", text: "Run on an open model (DeepSeek-V4-Flash) served on AMD via Token Factory." },
 ];
 
 function Facts() {

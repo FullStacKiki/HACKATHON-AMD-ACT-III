@@ -18,7 +18,7 @@ const WASH = { 0: "wash-navy", 2: "wash-amber", 5: "wash-violet" }; // a few car
 const TALLY = ["Yes", "Maybe", "No"].map((a) => ({ a, n: PERSONAS.filter((p) => p.answer === a).length }));
 
 const CHATBOT = ["One opinion", "Tends to be optimistic", "No idea who it represents"];
-const QUORUM = ["Hundreds of answers", "From profiles of real survey respondents", "A model fine-tuned only for this task, on AMD Instinct MI300X", "Trained on real answers, including the \u201cno\u201d"];
+const QUORUM = ["Hundreds of answers", "From profiles of real survey respondents", "An open model (DeepSeek-V4-Flash) served on AMD via Token Factory", "Answers that include the \u201cno\u201d, not only the yes"];
 
 function List({ items, good }) {
   const Icon = good ? Check : X;
@@ -81,11 +81,11 @@ export default function PeopleSection() {
         <div className="mt-16 grid gap-4 md:grid-cols-3">
           <Reveal className="panel rounded-[26px] p-6"><h3 className="font-display text-3xl text-zinc-100">A general chatbot</h3><List items={CHATBOT} /></Reveal>
           <Reveal delay={90} className="panel wash-violet rounded-[26px] border-accent/40 p-6"><h3 className="font-display text-3xl text-zinc-100">Quorum</h3><List items={QUORUM} good /></Reveal>
-          {/* Evaluation numbers stay [TBD] until the evaluation is done */}
+          {/* The latest real run (100 respondents, a weekly meal box at $9). Replace with the evaluation numbers once there are reports */}
           <Reveal delay={180} className="panel wash-amber flex flex-col rounded-[26px] p-6">
-            <p className="label">Accuracy on products it never saw</p>
+            <p className="label">Latest real run</p>
             <div className="mt-auto grid grid-cols-3 gap-3 pt-6">
-              {[["[TBD]%", "Quorum"], ["[TBD]%", "A general model"], ["84.4%", "Human ceiling"]].map(([v, l]) => (
+              {[["100", "Personas"], ["27%", "Would buy at $9"], ["19\u201336%", "95% interval"]].map(([v, l]) => (
                 <div key={l}><p className="num text-xl font-semibold text-zinc-50 md:text-2xl">{v}</p><p className="mt-1 text-xs text-zinc-400">{l}</p></div>
               ))}
             </div>

@@ -56,7 +56,7 @@ export function Briefing({ idea, data, demo, ai }) {
   const obj = has(data?.objections) ? [...data.objections].sort((a, b) => b.share - a.share).slice(0, 4) : null;
   const text = ai?.briefing;
   const example = !!demo || !!ai?.example_data;
-  const workspace = ai?.workspace || "[TBD]";
+  const workspace = ai?.workspace || "Quorum";
   const date = new Date().toISOString().slice(0, 10);
   return (
     <Document title={`${PRODUCT_NAME} briefing`}>

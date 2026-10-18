@@ -16,7 +16,7 @@
 //   competitors:  [{ name, price?, note? }]
 //   previous:     { score }                              the previous run, for the "Previous / Current" strip
 //   buyInterval:  { low, high }                          uncertainty interval of reactions.buy
-//   run:          { personas?, runtimeSeconds? }         run status (runtime on the MI300X)
+//   run:          { personas?, runtimeSeconds? }         run status
 //   topFix:       { text, gain?, idea? }                 the change with the biggest impact (gain = expected points of "would buy"; idea = the idea rewritten with the fix)
 //   wtpViews:     [{ question, segment, points: [{ price, share, low?, high? }] }]   curves per question and segment (feeds the dropdowns)
 //   compare:      { a: { label, buy }, b: { label, buy }, diff: { value, low, high } }   A/B, only when requested
