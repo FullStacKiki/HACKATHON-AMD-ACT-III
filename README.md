@@ -1,86 +1,133 @@
-# HACKATHON-AMD-ACT-III
+# Quorum
 
-> Test a business idea in minutes against a synthetic panel of consumers.
+> Test a business idea in minutes against a synthetic panel of US consumers.
 
 Built for the [AMD Developer Hackathon: ACT III](https://lablab.ai/ai-hackathons/amd-developer-hackathon-act-iii).
+**[Watch the 1-minute demo](docs/demo.mp4)** (made with Remotion, from the real app).
 
-## Introduction
+## The problem
 
-Validating a business idea usually takes weeks of surveys and interviews. This project lets founders and product managers test an idea in minutes against a synthetic panel of consumers.
+Validating a business idea usually takes weeks of surveys and interviews, and a chatbot asked "would you buy this?" gives one opinion that
+represents nobody. Founders need a fast first filter that answers like *different kinds of people* do.
 
-Our agents are open models fine-tuned on AMD Instinct GPUs with ROCm, using real survey answers from thousands of people, so they reproduce how different segments actually respond rather than how a chatbot imagines they would.
+## What Quorum does
+
+You describe an idea (or drop a pitch PDF), with its audience, category and price. Quorum designs a neutral survey for it, puts it to a panel of
+100 simulated people built from real US survey respondents, and returns a dashboard and a one-page briefing:
+
+- **Would buy:** the share of the panel that would buy at your price, with a bootstrap interval.
+- **Viability score** with its uncertainty range.
+- **Demand curve:** the share that would buy at 40% below to 40% above your price.
+- **Segments:** who says yes and who does not, by age, income and political leaning.
+- **Objections:** why the people who would not buy hesitate.
+- **Briefing (PDF):** verdict, who buys, recommended price (computed from the demand curve), objections, competitors and next steps.
+
+Nothing on screen is invented. Every number comes from the run, a missing value says so, and if the backend or an AI service is not available the
+app shows clearly labelled example data under an **"Example data"** banner.
+
+## A real run
+
+Idea: *a weekly box of ready-to-cook meals for busy college students*, priced at $9. 100 respondents sampled from Twin-2K-500, each played by
+DeepSeek-V4-Flash through the AMD Token Factory, the survey designed by an Evolus agent. 100 of 100 answered, in 431 seconds.
+
+| Result | Value |
+| --- | --- |
+| Would buy at $9 | **27%** (95% bootstrap interval 19% to 36%) |
+| Would buy only at a lower price | 54% |
+| Would not buy | 19% |
+| Viability score | 29 (range 23 to 35) |
+| Largest segment gap | income over $100k: 50%, under $50k: 14% |
+| Main objections | price 42%, quality of ingredients 28% |
+
+| Price per week | $5.40 | $7.20 | $9.00 | $10.80 | $12.60 |
+| --- | --- | --- | --- | --- | --- |
+| Would buy | 81% | 69% | 27% | 0% | 0% |
+
+The sharp drop just above $9 is how the model answered; we report it as measured, not as a forecast of real demand.
 
 ## How it works
 
-1. **Input:** the client describes the idea and its target audience.
-2. **Questions:** Gemini, acting as the teacher, turns the pitch into survey questions.
-3. **Panel:** the fine-tuned agents answer as different consumer segments.
-4. **Competitors:** a separate search step maps existing competitors.
+```mermaid
+flowchart LR
+  A[Idea, audience,<br/>category, price] --> B[Evolus agent<br/>US Survey Question Designer]
+  B --> C[12 survey questions<br/>prices at -40% .. +40%]
+  D[(Twin-2K-500<br/>2,058 US respondents)] --> E[Sample 100<br/>reduced profile]
+  C --> F[Token Factory<br/>DeepSeek-V4-Flash<br/>one call per person]
+  E --> F
+  F --> G[Aggregate + bootstrap<br/>score, curve, segments, objections]
+  G --> H[Dashboard]
+  G --> I[Evolus agent<br/>Consumer Panel Briefing]
+  I --> J[Briefing PDF]
+```
 
-## Output
+1. **Survey:** the pitch goes to the *US Survey Question Designer* agent on Evolus, which returns 10 to 14 neutral questions: purchase intent at five prices, interest, value for money, trust, recommendation, current alternatives, main feature and main concern.
+2. **Panel:** 100 people are sampled from Twin-2K-500 with their reduced profile (age, sex, education, family income, region). Each person gets one call with all the questions and answers as JSON `{"q1":"A",...}`. At most 5 calls run at once, with exponential backoff on HTTP 429.
+3. **Aggregation:** shares are counted from the answers; every interval comes from 1,000 bootstrap resamples of the respondents (2.5th to 97.5th percentile). The formulas are in the docstring of [`backend/panel.py`](backend/panel.py).
+4. **Briefing:** the results and the revenue-maximizing price (worked out by the backend) go to the *Consumer Panel Briefing* agent, which writes the briefing as JSON. The JSON is cleaned (code fences removed), validated and retried once; the frontend turns it into a PDF.
 
-For each segment, the panel returns:
+## Architecture
 
-- how the segment would react
-- the main objections
-- a willingness-to-pay estimate
+```mermaid
+flowchart TB
+  subgraph Browser
+    FE[React app<br/>dashboard, intake, briefing PDF]
+  end
+  subgraph Docker
+    NG[nginx :8080<br/>static app + /api proxy] --> BE[FastAPI :8000]
+  end
+  FE --> NG
+  BE -->|workflows: execute + poll| EV[Evolus workspace Quorum<br/>2 agents, 2 workflows]
+  BE -->|chat completions| TF[AMD Token Factory<br/>DeepSeek-V4-Flash]
+  BE --- TW[(twin_profiles.json<br/>demographics, CC BY 4.0)]
+```
 
-Every estimate comes with an uncertainty range.
+The Evolus REST API has no "ask an agent" route, so each agent sits in a workflow with one AgentCall step; the backend runs it
+(`POST /workflows/{id}/execute`, then polls `GET /workflows/{id}/executions/{executionId}`). A run takes minutes, so `/api/panel` starts a background
+job that the frontend polls.
+
+### API
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/panel` | Starts a panel run (pitch, audience, category, price); returns a job id |
+| `GET /api/panel/{jobId}` | Progress and, when done, the dashboard payload (or `example_data: true` if the run failed) |
+| `POST /api/questions` | Pitch to the survey designer agent; returns the questions |
+| `POST /api/briefing` | Results (+ computed `optimal_price`) to the briefing agent; returns its JSON |
+| `GET /api/health` | Health check |
+
+Interactive docs at `/docs`.
 
 ## Tech stack
 
-| Component | Role |
+| Layer | Technologies |
 | --- | --- |
-| Open models fine-tuned on AMD Instinct GPUs (ROCm) | Synthetic consumer panel |
-| Real survey data | Ground truth for fine-tuning |
-| Gemini | Teacher (pitch → survey questions) and baseline we measure against |
+| Frontend | Vite 8, React 19, Tailwind CSS v4, react-router, Recharts, lucide-react, topojson with us-atlas and world-atlas (persona maps), `@react-pdf/renderer` (briefing PDF) |
+| Backend | Python 3.12, FastAPI, Uvicorn, httpx (async), Pydantic, python-dotenv |
+| AI services | **Evolus** (workspace *Quorum*): agents and workflows for the survey and the briefing. **AMD Token Factory**: DeepSeek-V4-Flash plays each respondent |
+| Data | Twin-2K-500 (2,058 US respondents), plus GSS, ANES, Twin Mega-Study and GlobalOpinionQA for training and evaluation |
+| Demo video | Remotion 4 (React), Playwright screen recording, `@remotion/motion-blur` |
+| Packaging | Docker, Docker Compose, nginx |
 
-## Training data
+## Project structure
 
-The panel learns from real answers given by real people, not from text generated by another model.
-
-| Dataset | Used for |
-| --- | --- |
-| Twin-2K-500 | Training, validation and test: answers of 2,058 US respondents to more than 500 questions, including a pricing survey |
-| Twin-2K-500 Mega-Study | Evaluation only, on consumer-style studies |
-| GlobalOpinionQA | Evaluation only, at country level |
-| GSS 2016-2024, ANES 2024 | Downloaded but not used yet: candidates for a second training version (economic and policy attitudes, region and state) |
-| SubPOP | Not used in the current build (gated, optional) |
-
-Each training example pairs a demographic profile and a survey question with the answer a real respondent gave. The files use TRL's conversational prompt/completion format, so the loss is computed on the answer only. Splits are made per question, so no validation or test question appears in training.
-
-Half of the pricing products are held out in `eval_pricing.jsonl`. On those products, the same people gave the same answer two weeks later 84.4% of the time, which is the realistic ceiling for accuracy.
-
-A 100-row sample of the training data is in [`samples/train_sample.jsonl`](samples/train_sample.jsonl).
-
-## Model
-
-| | |
-| --- | --- |
-| Base model | [TBD, e.g. Llama 3.1 8B Instruct] |
-| Fine-tuning | LoRA (rank [16], alpha [32], all linear layers) |
-| Trainable parameters | [~42M, about 0.5% of the base model] |
-| Training data | ~186,000 examples from Twin-2K-500 |
-| Hardware | AMD Instinct MI300X, ROCm |
-| Training time | [TBD] |
-
-Results on `eval_pricing.jsonl` (held-out products):
-
-| Model | Accuracy |
-| --- | --- |
-| Base model | [TBD] |
-| Fine-tuned panel | [TBD] |
-| Gemini | [TBD] |
-| Human test-retest ceiling | 84.4% |
-
-## Further reading
-
-- [Capturing Immediate Reactions to Societal Events: An Event-Triggered Survey Approach](https://www.researchgate.net/publication/414364301_Capturing_Immediate_Reactions_to_Societal_Events_An_Event-Triggered_Survey_Approach): background on survey methodology.
-
-## Limitations
-
-- This is a fast first filter, not a replacement for talking to real customers.
-- The training data comes from US respondents, so the panel simulates US consumers.
+```
+.
+├── FRONT-END/            React app (landing, /app dashboard, new simulation, history)
+│   ├── components/       cards, charts, persona map, PDF upload
+│   ├── lib/              API shape, example data, panel client, briefing PDF
+│   ├── pages/            landing and app pages
+│   └── video/            Remotion project that renders the demo (npm run demo:video)
+├── backend/              FastAPI app
+│   ├── panel.py          the panel: sampling, calls, aggregation, bootstrap
+│   ├── token_factory.py  Token Factory client (5 at a time, backoff on 429)
+│   ├── evolus.py         Evolus client: workflows, JSON cleaning and validation
+│   ├── *_routes.py       /api/panel, /api/questions, /api/briefing
+│   └── panel_data/       Twin demographics the panel samples from
+├── scripts/              data download and training-set / panel-profile builders
+├── samples/              100-row sample of the training data
+├── docs/demo.mp4         demo video
+└── docker-compose.yml
+```
 
 ## Getting started
 
@@ -130,6 +177,37 @@ Run the panel on its own, from the command line:
 
 The 2,058 Twin respondents the panel draws from are in `backend/panel_data/twin_profiles.json` (demographics only, CC BY 4.0, see "Data and
 licenses"). To rebuild it from the raw data: `python -I scripts/BuildPanelProfiles.py --twin-dir <Twin-2K-500>/question_catalog_and_human_response_csv`.
+
+## Training data (for the fine-tuning step)
+
+The panel learns from real answers given by real people, not from text generated by another model.
+
+| Dataset | Used for |
+| --- | --- |
+| Twin-2K-500 | Training, validation and test: answers of 2,058 US respondents to more than 500 questions, including a pricing survey |
+| Twin-2K-500 Mega-Study | Evaluation only, on consumer-style studies |
+| GlobalOpinionQA | Evaluation only, at country level |
+| GSS 2016-2024, ANES 2024 | Downloaded but not used yet: candidates for a second training version (economic and policy attitudes, region and state) |
+| SubPOP | Not used in the current build (gated, optional) |
+
+Each training example pairs a demographic profile and a survey question with the answer a real respondent gave. The files use TRL's conversational prompt/completion format, so the loss is computed on the answer only. Splits are made per question, so no validation or test question appears in training.
+
+Half of the pricing products are held out in `eval_pricing.jsonl`. On those products, the same people gave the same answer two weeks later 84.4% of the time, which is the realistic ceiling for accuracy.
+
+A 100-row sample of the training data is in [`samples/train_sample.jsonl`](samples/train_sample.jsonl).
+
+## Roadmap
+
+- **Fine-tune the panel on AMD Instinct (ROCm).** The panel today is a general model (DeepSeek-V4-Flash) conditioned on each respondent's profile. The next step is to fine-tune an open model with LoRA on ~186,000 Twin-2K-500 examples (already built, see below) on AMD Instinct MI300X, and compare it with the current panel on the held-out pricing set (human test-retest ceiling: 84.4%).
+- State-level personas (add GSS and ANES), so the map and the "what people said" feed can be filled.
+- Competitor search and A/B comparison of two versions or prices.
+
+## Limitations
+
+- This is a fast first filter, not a replacement for talking to real customers.
+- The panel simulates US consumers: the respondents are Americans from Twin-2K-500.
+- Answers come from a language model conditioned on a demographic profile; they have not yet been validated against real purchase behavior. Use the intervals, not the point estimates.
+- Twin-2K-500 gives each respondent's region, not state, so there is no per-state view yet.
 
 ## Data and licenses
 
