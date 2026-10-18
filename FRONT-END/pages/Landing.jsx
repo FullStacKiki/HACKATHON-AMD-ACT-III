@@ -107,7 +107,7 @@ const FACTS = [
   { big: 2058, fmt: (n) => n.toLocaleString("en-US"), title: "US consumers", text: "Real survey respondents stand behind the panel." },
   { big: 3, title: "Survey datasets", text: "Twin-2K-500, GSS and ANES." },
   { big: "Hundreds", title: "Simulated people per run", text: "Each one answers as a real respondent would." },
-  { big: "Millions", title: "Simulations", text: "Run on an open model (DeepSeek-V4-Flash) served on AMD via Token Factory." },
+  { big: "260M", title: "US adults", text: "Weighted to represent 260M US adults (ACS 2024). Run on an open model (DeepSeek-V4-Flash) served on AMD via Token Factory." },
 ];
 
 function Facts() {
