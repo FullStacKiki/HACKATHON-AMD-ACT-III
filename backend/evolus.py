@@ -30,7 +30,7 @@ BASE_URL = os.getenv("EVOLUS_BASE_URL", "https://api.evolus.ai/api/v1").rstrip("
 PART_SIZE = 480          # characters per execution parameter (Evolus allows 500)
 MAX_PARTS = 16
 POLL_SECONDS = 1.5
-TIMEOUT_SECONDS = 90.0
+TIMEOUT_SECONDS = 180.0
 
 
 class EvolusError(Exception):
@@ -120,14 +120,14 @@ def parse_json(raw: str) -> Any:
     raise ValueError("the answer is not valid JSON")
 
 
-async def ask_json(workflow_env: str, text: str, validate: Callable[[Any], Any], complete: bool = False) -> Any:
+async def ask_json(workflow_env: str, text: str, validate: Callable[[Any], Any], complete: bool = False, attempts: int = 2) -> Any:
     """Run the agent, parse and validate its JSON; if that fails, try once more. Raises EvolusError, or MissingInput.
     complete=True means the caller sent every input the agent needs: a "missing_input" answer is then a mistake of the model, so it is retried."""
     workflow_id = _env(workflow_env)
     if not configured(workflow_env):
         raise EvolusError("Evolus is not configured")
     last: Exception = EvolusError("no attempt")
-    for attempt in (1, 2):
+    for attempt in range(1, attempts + 1):
         try:
             raw = await run_workflow(workflow_id, text)
             if os.getenv("EVOLUS_DEBUG"):

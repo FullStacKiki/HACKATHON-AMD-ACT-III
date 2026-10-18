@@ -5,6 +5,7 @@ import { Document, Page, StyleSheet, Text, View, pdf } from "@react-pdf/renderer
 import { FIRST_FILTER_NOTE } from "./copy";
 import { has, verdictOf } from "./apiShape";
 import { PRODUCT_NAME } from "../brand";
+import { api } from "./api";
 
 const ink = "#141414", muted = "#6b6b66", line = "#e4e4df", lime = "#a6cf1c";
 const s = StyleSheet.create({
@@ -145,7 +146,7 @@ export async function fetchBriefing({ idea, data, demo }) {
     objections: data?.objections, competitors: data?.competitors, example_data: !!demo,
   };
   try {
-    const r = await fetch("/api/briefing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(240000) });
+    const r = await fetch(api("/api/briefing"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(240000) });
     if (!r.ok) return null;
     return await r.json();
   } catch {

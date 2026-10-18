@@ -233,7 +233,7 @@ async def run_panel(pitch: str, audience: str | None = None, category: str | Non
     if questions is None:
         lines = [f"Product idea or pitch: {pitch.strip()}"] + ([f"Target audience: {audience}"] if audience else []) + ([f"Category: {category}"] if category else []) + ([f"Price: {price:g} US dollars"] if price is not None else [])
         try:
-            questions = await evolus.ask_json("EVOLUS_WORKFLOW_QUESTIONS_ID", "\n".join(lines), evolus.validate_questions, complete=bool(audience and category and price is not None))
+            questions = await evolus.ask_json("EVOLUS_WORKFLOW_QUESTIONS_ID", "\n".join(lines), evolus.validate_questions, complete=bool(audience and category and price is not None), attempts=3)
         except (evolus.EvolusError, evolus.MissingInput) as e:
             raise PanelError(f"could not get the survey from Evolus ({e})") from e
     qs = normalise(questions)
