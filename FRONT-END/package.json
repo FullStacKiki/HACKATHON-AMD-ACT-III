@@ -1,0 +1,37 @@
+{
+  "name": "front-end",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "demo:record": "node video/record.mjs",
+    "demo:render": "node video/render.mjs",
+    "demo:video": "npm run demo:record && npm run demo:render",
+    "demo:studio": "remotion studio video/index.jsx --config=video/remotion.config.js --public-dir=video/public"
+  },
+  "dependencies": {
+    "@react-pdf/renderer": "^4.9.0",
+    "lucide-react": "^1.57.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "recharts": "^3.10.1",
+    "topojson-client": "^3.1.0",
+    "us-atlas": "^3.0.1",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "@remotion/cli": "^4.0.535",
+    "@remotion/motion-blur": "4.0.535",
+    "@remotion/tailwind-v4": "^4.0.535",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "playwright": "1.64.1",
+    "remotion": "^4.0.535",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.4"
+  }
+}

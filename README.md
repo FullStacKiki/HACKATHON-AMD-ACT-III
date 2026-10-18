@@ -84,7 +84,52 @@ Results on `eval_pricing.jsonl` (held-out products):
 
 ## Getting started
 
-<!-- TODO: requirements, environment variables, how to run the app -->
+You need [Docker](https://docs.docker.com/get-docker/) with Compose.
+
+1. Create the backend settings and fill them in. The file is ignored by git: never commit it.
+
+   ```bash
+   cp backend/.env.example backend/.env
+   ```
+
+   | Variable | What it is |
+   | --- | --- |
+   | `EVOLUS_API_KEY`, `EVOLUS_APP_ID` | Keys of the Evolus workspace that holds the two agents (survey designer, briefing writer) |
+   | `EVOLUS_WORKFLOW_QUESTIONS_ID`, `EVOLUS_WORKFLOW_BRIEFING_ID` | The two Evolus workflows the backend runs, one agent each |
+   | `EVOLUS_WORKSPACE_NAME` | Workspace name written in the footer of the briefing |
+   | `TOKEN_FACTORY_BASE_URL`, `TOKEN_FACTORY_API_KEY`, `TOKEN_FACTORY_MODEL` | The Token Factory model that plays each respondent |
+   | `PANEL_PEOPLE` (optional) | Respondents per run, 100 by default |
+
+2. Start everything:
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. Open <http://localhost:8080>. The API documentation is at <http://localhost:8000/docs>.
+
+A run samples 100 people from Twin-2K-500, asks each of them the survey designed by the Evolus agent, and takes a few minutes. If the backend,
+Evolus or the Token Factory is not available, the app shows example data under an "Example data" banner.
+
+### Without Docker
+
+```bash
+# backend (port 8000)
+python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
+.venv/bin/python -m uvicorn backend.main:app --port 8000
+
+# frontend (port 5173, sends /api to the backend)
+cd FRONT-END && npm install && npm run dev
+```
+
+Run the panel on its own, from the command line:
+
+```bash
+.venv/bin/python -m backend.panel --pitch "A weekly box of ready-to-cook meals" --audience "College students" --category "Food" --price 9 --n 20
+```
+
+The 2,058 Twin respondents the panel draws from are in `backend/panel_data/twin_profiles.json` (demographics only, CC BY 4.0, see "Data and
+licenses"). To rebuild it from the raw data: `python -I scripts/BuildPanelProfiles.py --twin-dir <Twin-2K-500>/question_catalog_and_human_response_csv`.
 
 ## Data and licenses
 

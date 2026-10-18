@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+/* One theme: near-black with an ember-orange accent. Green = positive, red = warning. */
+:root {
+  color-scheme: dark;
+  --bg: #0a0a0a;
+  --bg-elev: #131313;
+  --text: #ededeb;
+  --muted: #8b8b88;
+  --dim: #3a3a38;
+  --fg: 255 255 255; /* rgb triplet for borders and hairlines */
+  /* the one accent: highlighted data and actions. It is also the "positive" state. */
+  --accent: #c6f135;
+  --lime: #c6f135;
+  /* negative and mixed states, muted */
+  --amber: #d6b24f;
+  --warn: #d9695f;
+}
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-dot: "Doto", "Inter", monospace;
+  --font-display: "Bricolage Grotesque", "Inter", system-ui, sans-serif;
+  --color-bg: var(--bg);
+  --color-elev: var(--bg-elev);
+  --color-lime: var(--lime);
+  --color-warn: var(--warn);
+  --color-amber: var(--amber);
+  --color-accent: var(--accent);
+}
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums; /* every number in Inter has equal-width digits */
+}
+
+/* Fine film grain over everything */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+@layer components {
+  /* Large rounded panel: hairline border, soft inner gradient */
+  .panel {
+    position: relative;
+    border-radius: 18px;
+    border: 1px solid rgb(var(--fg) / 0.07);
+    background: var(--bg-elev);
+  }
+  .panel-lg { border-radius: 18px; }
+
+  /* The only gradient: a light lime one on the needle card */
+  .veil-main { background: radial-gradient(90% 120% at 0% 0%, rgba(198, 241, 53, 0.09), transparent 60%), var(--bg-elev); }
+
+  /* A soft colour wash from one corner, on a few cards only */
+  .wash-amber { background: radial-gradient(100% 120% at 0% 0%, rgba(200, 120, 40, 0.22), transparent 62%), var(--bg-elev); }
+  .wash-navy { background: radial-gradient(100% 120% at 100% 0%, rgba(60, 90, 210, 0.24), transparent 62%), var(--bg-elev); }
+  .wash-violet { background: radial-gradient(110% 120% at 100% 100%, rgba(150, 95, 255, 0.34), transparent 62%), var(--bg-elev); }
+  @keyframes sheen { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+  .sheen { background-image: linear-gradient(90deg, transparent, rgb(var(--fg) / 0.08), transparent); background-size: 200% 100%; animation: sheen 2.2s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .sheen { animation: none; } }
+
+  .label { font-size: 0.75rem; letter-spacing: 0.02em; color: var(--muted); }
+
+  /* Pill buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    border-radius: 9999px; padding: 0.7rem 1.25rem; font-size: 0.9375rem; font-weight: 500;
+    border: 1px solid rgb(var(--fg) / 0.14);
+    background: rgb(var(--fg) / 0.04); color: var(--text);
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
+    cursor: pointer; text-decoration: none;
+  }
+  .btn:hover { background: rgb(var(--fg) / 0.09); border-color: rgb(var(--fg) / 0.26); }
+  .btn:focus-visible, .nav-item:focus-visible, a:focus-visible, button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #0b0d02; border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent); border-color: var(--accent); filter: brightness(1.12); }
+  .btn-accent { background: var(--accent); color: #0b0d02; border-color: var(--accent); }
+  .btn-accent:hover { background: var(--accent); border-color: var(--accent); filter: brightness(1.12); }
+
+  /* Dot-matrix: only the main score and the word "minutes" */
+  .font-display { font-weight: 600; letter-spacing: -0.035em; }
+  .dot { font-family: var(--font-dot); font-weight: 700; letter-spacing: 0.01em; line-height: 1; font-variant-numeric: normal; }
+  .num { font-weight: 600; line-height: 1; }
+
+  /* Segmented meters: a bar cut into thin vertical ticks, like the balance bars of the reference */
+  .seg { -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px); mask-image: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px); }
+
+  /* Scroll reveal */
+  .reveal { opacity: 0; transform: translateY(24px); filter: blur(8px); transition: opacity 0.8s ease, transform 0.8s cubic-bezier(.2,.7,.2,1), filter 0.8s ease; transition-delay: var(--d, 0ms); }
+  .reveal.in { opacity: 1; transform: none; filter: none; }
+
+  /* Entrance: staggered by --i */
+  .rise { animation: rise 0.7s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--i, 0) * 70ms); }
+  .slide-up { display: inline-block; animation: slide-up 0.95s cubic-bezier(.2,.7,.2,1) both; animation-delay: var(--d, 0ms); }
+  @keyframes slide-up { from { transform: translateY(108%); } to { transform: none; } }
+  .page-in { animation: page-in 0.45s cubic-bezier(.2,.7,.2,1) both; }
+  .panel-hover { transition: transform 0.3s cubic-bezier(.2,.7,.2,1), border-color 0.3s; }
+  .panel-hover:hover { transform: translateY(-3px); border-color: rgb(var(--fg) / 0.22); }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px) scale(0.985); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+  @keyframes page-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; filter: none; transition: none; }
+    .rise, .page-in, .slide-up { animation: none; }
+    .panel-hover:hover { transform: none; }
+  }
+
+}
+
+::selection { background: color-mix(in srgb, var(--accent) 40%, transparent); }

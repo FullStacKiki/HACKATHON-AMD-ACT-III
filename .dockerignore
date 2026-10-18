@@ -1,0 +1,6 @@
+# The backend image is built from the repository root: send only the backend, and never a .env.
+*
+!backend
+**/.env
+**/__pycache__
+**/.DS_Store

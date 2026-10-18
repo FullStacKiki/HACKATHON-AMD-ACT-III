@@ -1,0 +1,19 @@
+# docker compose up --build   ->   app on http://localhost:8080, API docs on http://localhost:8000/docs
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: ./backend/.env        # copy backend/.env.example to backend/.env and fill it in; the file is never committed
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./FRONT-END
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
